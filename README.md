@@ -18,6 +18,17 @@ python server.py
 O fluxo roda fim-a-fim com **conectores mockados**. Clique em *“Usar exemplos e
 começar”* para ver onboarding → postura → entrevista → recap → slide de amostra.
 
+### Conectores reais já ativos (sem credencial)
+- **Upload**: extrai a paleta exata por CV (Pillow) do arquivo enviado.
+- **Site**: render headless via **Playwright** → CSS computado (cor/fonte), copy
+  do DOM, logo/og:image e paleta por screenshot. Para ativar localmente:
+  ```bash
+  pip install -r requirements.txt
+  playwright install chromium     # baixa o navegador
+  ```
+  (No Windows, `greenlet` exige o Visual C++ Redistributable.) Sem o navegador
+  instalado, o conector cai no mock automaticamente — o fluxo nunca quebra.
+
 ## A alma do sistema (regras de design)
 
 1. **Schema único** — todo atributo é um nó com a mesma forma (`schema.py`).

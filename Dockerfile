@@ -1,12 +1,14 @@
-# Ponto Zero — imagem de produção (v1 roda em stdlib pura).
+# Ponto Zero — imagem de produção.
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Em v1 não há dependências externas (stdlib). Mantemos o passo para evoluir
-# (ex.: Playwright/FastAPI) sem mudar o pipeline de build.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Navegador do Playwright + dependências de SO (para o conector de site real).
+# --with-deps instala as libs do sistema que o Chromium headless precisa.
+RUN playwright install --with-deps chromium
 
 COPY . .
 

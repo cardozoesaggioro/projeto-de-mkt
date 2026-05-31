@@ -57,25 +57,14 @@ class RawBundle:
 # ===========================================================================
 # CONECTORES (mockados — devolvem hipóteses de exemplo coerentes)
 # ===========================================================================
-def connect_site(url: str) -> RawBundle:
-    """
-    Site: deveria subir um browser headless (Playwright), renderizar, ler o CSS
-    COMPUTADO (cor/fonte exatas), a copy do DOM, o logo e a og:image. Sem auth,
-    respeitando robots.txt.
-
-    # TODO[REAL]: substituir o mock por Playwright headless.
-    #   - render -> getComputedStyle p/ cor e font-family exatas (deterministico)
-    #   - DOM -> copy (h1/lead/CTA) ; <meta og:image> e <link rel=icon> -> logo
-    #   - respeitar robots.txt ; sem credencial (conector público)
-    """
+def _site_mock() -> RawBundle:
+    """Hipótese de exemplo coerente — usada quando o Playwright não está disponível."""
     return RawBundle(
         source="site",
         access_status="ok",
         detail="MOCK — Playwright não acionado (sem render real).",
         raw={
-            # cor declarada no CSS computado (deterministico) — azul institucional
             "color_css": {"value": (22, 54, 122), "scope": Scope.DETERMINISTICO},
-            # paletas de imagens do site (banners/og) p/ o resolvedor de cor (CV)
             "image_palettes": [
                 [((22, 54, 122), 0.55), ((212, 175, 55), 0.20), ((245, 245, 245), 0.25)],
                 [((26, 60, 130), 0.50), ((210, 178, 60), 0.25), ((255, 255, 255), 0.25)],
@@ -90,6 +79,119 @@ def connect_site(url: str) -> RawBundle:
             "vocabulary": {"value": ["base", "evidência", "clareza"], "scope": Scope.DECLARADO},
         },
     )
+
+
+def _robots_allows(url: str, user_agent: str = "PontoZeroBot") -> bool:
+    """Respeita robots.txt. Em dúvida (sem robots/erro), permite (padrão da web)."""
+    import urllib.robotparser
+    try:
+        parts = urllib.parse.urlsplit(url)
+        robots = f"{parts.scheme}://{parts.netloc}/robots.txt"
+        rp = urllib.robotparser.RobotFileParser()
+        rp.set_url(robots)
+        rp.read()
+        return rp.can_fetch(user_agent, url)
+    except Exception:
+        return True
+
+
+def _parse_rgb(css: str) -> RGB | None:
+    """Converte 'rgb(22, 54, 122)' / 'rgba(...)' do CSS computado em tupla."""
+    if not css:
+        return None
+    nums = [int(float(n)) for n in __import__("re").findall(r"[\d.]+", css)[:3]]
+    return (nums[0], nums[1], nums[2]) if len(nums) >= 3 else None
+
+
+def connect_site(url: str) -> RawBundle:
+    """
+    Site: sobe um browser headless (Playwright), renderiza e lê o CSS COMPUTADO
+    (cor/fonte exatas = deterministico), a copy do DOM, o logo/og:image, e tira
+    um screenshot para a paleta via CV. Sem auth, respeitando robots.txt.
+
+    Se o Playwright não estiver instalado, cai no mock (o fluxo nunca quebra).
+    """
+    try:
+        from playwright.sync_api import sync_playwright  # import preguiçoso
+    except ImportError:
+        return _site_mock()
+
+    if not url:
+        return _site_mock()
+    if not _robots_allows(url):
+        return RawBundle("site", "blocked",
+                         detail=f"robots.txt não permite rastrear {url}.")
+
+    try:
+        return _site_real(url, sync_playwright)
+    except Exception as exc:  # timeout / DNS / render -> honesto
+        return RawBundle("site", "partial",
+                         detail=f"Render falhou ({type(exc).__name__}: {exc}); sem dados do site.")
+
+
+def _site_real(url: str, sync_playwright) -> RawBundle:
+    """Render headless + extração determinística. Chamado por connect_site."""
+    raw: dict[str, Any] = {}
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--no-sandbox"])
+        page = browser.new_page(user_agent="PontoZeroBot")
+        page.goto(url, wait_until="networkidle", timeout=20000)
+
+        # --- CSS COMPUTADO (deterministico): cor de destaque + tipografia ---
+        # cor: pega a cor computada de um CTA/botão proeminente; senão, do h1.
+        accent = page.evaluate(
+            """() => {
+                const el = document.querySelector('button, .btn, a.button, [class*=cta]')
+                          || document.querySelector('h1') || document.body;
+                const s = getComputedStyle(el);
+                // prioriza background com cor; senão a cor do texto
+                const bg = s.backgroundColor;
+                return (bg && bg !== 'rgba(0, 0, 0, 0)') ? bg : s.color;
+            }"""
+        )
+        font = page.evaluate(
+            "() => getComputedStyle(document.querySelector('h1, h2') || document.body).fontFamily"
+        )
+        rgb = _parse_rgb(accent)
+        if rgb:
+            raw["color_css"] = {"value": rgb, "scope": Scope.DETERMINISTICO}
+        if font:
+            raw["typography"] = {"value": font.split(",")[0].strip(' "\''),
+                                 "scope": Scope.DETERMINISTICO}
+
+        # --- COPY do DOM ---
+        def text(sel: str) -> str:
+            el = page.query_selector(sel)
+            return (el.inner_text().strip() if el else "")[:200]
+
+        h1 = text("h1")
+        desc = page.evaluate(
+            "() => (document.querySelector('meta[name=description]')||{}).content || ''"
+        )
+        if h1:
+            raw["tagline"] = {"value": h1, "scope": Scope.DECLARADO}
+        if desc:
+            raw["positioning"] = {"value": desc[:200], "scope": Scope.DECLARADO}
+
+        # --- LOGO / og:image ---
+        og = page.evaluate(
+            "() => (document.querySelector('meta[property=\"og:image\"]')||{}).content || ''"
+        )
+        if og:
+            raw["logo"] = {"value": og, "scope": Scope.DECLARADO}
+
+        # --- SCREENSHOT -> paleta via CV ---
+        try:
+            shot = page.screenshot(full_page=False)
+            raw["image_palettes"] = [palette_from_image_bytes(shot)]
+        except Exception:
+            pass
+
+        browser.close()
+
+    status = "ok" if raw else "partial"
+    return RawBundle("site", status, raw=raw,
+                     detail=f"Playwright render OK ({len(raw)} sinais de {url}).")
 
 
 GRAPH_API = "https://graph.facebook.com/v21.0"

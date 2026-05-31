@@ -2,7 +2,11 @@
 # O core (http.server, sqlite3, json, LLM proxy, Graph API) é STDLIB pura.
 # A extração de paleta de cor por CV usa Pillow:
 pillow>=11.0            # extrai paleta exata de uploads e imagens do Instagram (CV)
+playwright>=1.49        # render headless do site -> CSS computado / copy / logo / paleta
 
-# Próximas, quando ligarmos os demais conectores reais (ver TODO[REAL]):
-# playwright>=1.49      # render headless do site -> CSS computado / copy / logo
+# Próximo conector real (ver TODO[REAL]):
 # pypdf>=5.0            # parse de PDF nos uploads de brand guide
+#
+# NOTA: o Playwright precisa do navegador instalado. Local: `playwright install
+# chromium`. Em Docker, o Dockerfile já roda `playwright install --with-deps chromium`.
+# greenlet (dep do Playwright) exige o Visual C++ Redistributable no Windows.
