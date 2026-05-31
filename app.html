@@ -94,7 +94,7 @@
       <div class="row"><input type="file" id="uploadFile" accept="image/*">
            <button onclick="uploadFile()">Enviar logo/imagem (CV real)</button></div>
       <div class="row"><input type="file" id="refShots" accept="image/*" multiple>
-           <button onclick="uploadRefs()">Referências de carrossel (estilo)</button></div>
+           <button onclick="uploadRefs()">Referências de estilo — base de TODOS (admin)</button></div>
       <div id="refStatus" class="muted" style="font-size:12px"></div>
       <div class="row" style="margin-top:14px">
         <button class="primary" onclick="seedAndGo()">Usar exemplos e começar ▶</button>
@@ -261,10 +261,10 @@ async function uploadRefs(){
     files.push({b64, name:file.name});
   }
   const res=await api('/api/reference',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({session:SID, files})});
+        body:JSON.stringify({session:SID, scope:'global', files})});
   if(res.error){ $('#refStatus').textContent='erro: '+(res.detail||res.error); return; }
   SID=res.session;
-  $('#refStatus').innerHTML = `<b>${res.total} referência(s) de estilo guardada(s):</b><br>` +
+  $('#refStatus').innerHTML = `<b>Base global: ${res.total_global} referência(s) de estilo.</b><br>` +
      (res.added||[]).map(s=>`• ${s.resumo||s.formato||'estilo'} <span class="muted">(${s.fonte})</span>`).join('<br>');
 }
 async function uploadProfile(){

@@ -44,6 +44,27 @@ from schema import Node, Status
 CFG = Config.from_env()
 APP_HTML = Path(__file__).with_name("app.html")
 
+# Referências de estilo GLOBAIS (a base de carrossel para TODOS os usuários).
+# Ficam num arquivo versionado -> sobrevivem a reinícios/deploys do Render.
+DEFAULT_REFS_FILE = Path(__file__).with_name("default_style_references.json")
+
+
+def load_default_references() -> list:
+    try:
+        if DEFAULT_REFS_FILE.exists():
+            return json.loads(DEFAULT_REFS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return []
+
+
+def save_default_references(refs: list) -> None:
+    DEFAULT_REFS_FILE.write_text(
+        json.dumps(refs, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+_DEFAULT_REFS = load_default_references()
+
 # ---------------------------------------------------------------------------
 # Sessões em memória (uma entrevista por sessão). Protegidas por lock porque
 # usamos ThreadingHTTPServer.
@@ -316,7 +337,8 @@ def brandbook_payload(sess: dict[str, Any]) -> dict[str, Any]:
         "nodes": [n.to_dict() for n in nodes.values()],
         "motor": motor.snapshot() if motor else None,
         "sample_slide": build_sample_slide(nodes) if nodes else None,
-        "style_references": sess.get("style_references", []),
+        # base global (estilo da casa) + referências específicas da sessão
+        "style_references": _DEFAULT_REFS + sess.get("style_references", []),
         "generated_at": _now_iso(),
     }
 
@@ -536,7 +558,11 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"session": sid, **result})
 
     def _reference(self, body: dict[str, Any]) -> None:
-        """Sobe imagens de REFERÊNCIA de estilo de carrossel -> visão extrai o estilo."""
+        """
+        Sobe imagens de REFERÊNCIA de estilo -> visão extrai o estilo.
+        scope='global' (padrão) = base de TODOS os usuários (arquivo versionado);
+        scope='session' = só desta sessão.
+        """
         sid = body.get("session") or _new_session()
         sess = _get_session(sid)
         if sess is None:
@@ -544,7 +570,7 @@ class Handler(BaseHTTPRequestHandler):
         if not CFG.has_llm:
             return self._json({"error": "sem_llm",
                                "detail": "leitura de estilo requer LLM_API_KEY (visão)."}, 400)
-        refs = sess.setdefault("style_references", [])
+        scope = (body.get("scope") or "global").lower()
         added = []
         for f in body.get("files", []):
             b64 = f.get("b64")
@@ -553,9 +579,17 @@ class Handler(BaseHTTPRequestHandler):
             style = extract_style_reference(b64)
             if style:
                 style["fonte"] = f.get("name", "referência")
-                refs.append(style)
+                if scope == "global":
+                    style["global"] = True
+                    _DEFAULT_REFS.append(style)
+                else:
+                    sess.setdefault("style_references", []).append(style)
                 added.append(style)
-        self._json({"session": sid, "added": added, "total": len(refs)})
+        if scope == "global":
+            save_default_references(_DEFAULT_REFS)  # persiste no arquivo versionado
+        self._json({"session": sid, "scope": scope, "added": added,
+                    "total_global": len(_DEFAULT_REFS),
+                    "total_sessao": len(sess.get("style_references", []))})
 
     def _carousel_png(self, body: dict[str, Any]) -> None:
         html = body.get("html", "")
