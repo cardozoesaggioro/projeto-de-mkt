@@ -93,6 +93,9 @@
            <button onclick="uploadProfile()">Analisar print de perfil (IG)</button></div>
       <div class="row"><input type="file" id="uploadFile" accept="image/*">
            <button onclick="uploadFile()">Enviar logo/imagem (CV real)</button></div>
+      <div class="row"><input type="file" id="refShots" accept="image/*" multiple>
+           <button onclick="uploadRefs()">Referências de carrossel (estilo)</button></div>
+      <div id="refStatus" class="muted" style="font-size:12px"></div>
       <div class="row" style="margin-top:14px">
         <button class="primary" onclick="seedAndGo()">Usar exemplos e começar ▶</button>
         <span class="muted" id="connStatus"></span>
@@ -247,6 +250,22 @@ async function uploadFile(){
   $('#connStatus').textContent = `upload ✔ · ${res.bundle.detail}`;
   $('#bundles').innerHTML += `<div>• <b>upload</b> <span class="pill ok">${res.bundle.access_status}</span> ${res.bundle.detail}</div>`;
   refreshPanel();
+}
+async function uploadRefs(){
+  const inp=$('#refShots'); const fs=inp.files;
+  if(!fs || !fs.length){ $('#refStatus').textContent='escolha 1+ imagens de referência'; return; }
+  $('#refStatus').textContent=`lendo estilo de ${fs.length} referência(s)…`;
+  const files=[];
+  for(const file of fs){
+    const b64=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.readAsDataURL(file);});
+    files.push({b64, name:file.name});
+  }
+  const res=await api('/api/reference',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({session:SID, files})});
+  if(res.error){ $('#refStatus').textContent='erro: '+(res.detail||res.error); return; }
+  SID=res.session;
+  $('#refStatus').innerHTML = `<b>${res.total} referência(s) de estilo guardada(s):</b><br>` +
+     (res.added||[]).map(s=>`• ${s.resumo||s.formato||'estilo'} <span class="muted">(${s.fonte})</span>`).join('<br>');
 }
 async function uploadProfile(){
   const inp=$('#profileShot'); const file=inp.files && inp.files[0];

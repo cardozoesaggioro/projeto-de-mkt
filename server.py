@@ -66,7 +66,8 @@ def _now_iso() -> str:
 def _new_session() -> str:
     sid = uuid.uuid4().hex[:12]
     with _LOCK:
-        _SESSIONS[sid] = {"bundles": [], "nodes": None, "motor": None}
+        _SESSIONS[sid] = {"bundles": [], "nodes": None, "motor": None,
+                          "style_references": []}
     return sid
 
 
@@ -228,6 +229,33 @@ def extract_profile_signals(image_b64: str) -> dict[str, Any]:
     return out
 
 
+def extract_style_reference(image_b64: str) -> dict[str, Any]:
+    """
+    Lê uma imagem de post/slide usada como REFERÊNCIA de estilo de carrossel e
+    descreve o estilo (para guiar a geração futura). Retorna {} em falha.
+    """
+    prompt = (
+        "Esta é uma imagem de um post/slide de Instagram usada como REFERÊNCIA de "
+        "ESTILO para criar carrosséis. Descreva o estilo de forma objetiva. "
+        "Responda APENAS um JSON: "
+        '{"estrutura":"<capa/miolo/CTA, como organiza>","uso_de_cor":"<paleta e como usa>",'
+        '"tipografia":"<estilo de fonte/peso>","densidade_texto":"baixa|média|alta",'
+        '"formato":"<lista, citação, dado, storytelling, etc.>",'
+        '"resumo":"<1 frase que resume o estilo>"}.'
+    )
+    raw = call_vision(image_b64, prompt, max_tokens=400)
+    if not raw:
+        return {}
+    try:
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    keys = ("estrutura", "uso_de_cor", "tipografia", "densidade_texto", "formato", "resumo")
+    out = {k: str(data[k]).strip() for k in keys if isinstance(data.get(k), str) and data[k].strip()}
+    return out
+
+
 def llm_phrase_question(node: Node) -> str:
     """Frase humana da pergunta — via LLM se houver chave, senão heurística."""
     if not CFG.has_llm:
@@ -288,6 +316,7 @@ def brandbook_payload(sess: dict[str, Any]) -> dict[str, Any]:
         "nodes": [n.to_dict() for n in nodes.values()],
         "motor": motor.snapshot() if motor else None,
         "sample_slide": build_sample_slide(nodes) if nodes else None,
+        "style_references": sess.get("style_references", []),
         "generated_at": _now_iso(),
     }
 
@@ -368,6 +397,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._carousel(body)
             if path == "/api/carousel/png":
                 return self._carousel_png(body)
+            if path == "/api/reference":
+                return self._reference(body)
             self._json({"error": "not_found", "path": path}, 404)
         except Exception as exc:
             self._json({"error": "internal", "detail": str(exc)}, 500)
@@ -503,6 +534,28 @@ class Handler(BaseHTTPRequestHandler):
         llm = call_llm if CFG.has_llm else None
         result = carousel.build_carousel(values, topic, n_slides, llm)
         self._json({"session": sid, **result})
+
+    def _reference(self, body: dict[str, Any]) -> None:
+        """Sobe imagens de REFERÊNCIA de estilo de carrossel -> visão extrai o estilo."""
+        sid = body.get("session") or _new_session()
+        sess = _get_session(sid)
+        if sess is None:
+            return self._json({"error": "sessao_invalida"}, 400)
+        if not CFG.has_llm:
+            return self._json({"error": "sem_llm",
+                               "detail": "leitura de estilo requer LLM_API_KEY (visão)."}, 400)
+        refs = sess.setdefault("style_references", [])
+        added = []
+        for f in body.get("files", []):
+            b64 = f.get("b64")
+            if not b64:
+                continue
+            style = extract_style_reference(b64)
+            if style:
+                style["fonte"] = f.get("name", "referência")
+                refs.append(style)
+                added.append(style)
+        self._json({"session": sid, "added": added, "total": len(refs)})
 
     def _carousel_png(self, body: dict[str, Any]) -> None:
         html = body.get("html", "")
