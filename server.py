@@ -337,7 +337,9 @@ class Handler(BaseHTTPRequestHandler):
             sess["bundles"].append(bundle)
             # (re)monta os nós com tudo que já chegou — respeitando MONOTONICIDADE
             # (passa os nós atuais p/ preservar confirmações do humano).
-            sess["nodes"] = connectors.build_nodes(sess["bundles"], previous=sess["nodes"])
+            sess["nodes"] = connectors.build_nodes(
+                sess["bundles"], previous=sess["nodes"],
+                llm_call=(call_llm if CFG.has_llm else None))
             if sess["motor"] is None:
                 sess["motor"] = Motor(sess["nodes"])
             else:

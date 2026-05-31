@@ -725,8 +725,54 @@ def _perceptual_agreement(prov: list[Provenance], winner_hex: str) -> float:
     return round((matches + 0.5) / (len(prov) + 1), 4)
 
 
+def _corpus_from_nodes(nodes: dict[str, Node]) -> str:
+    """Junta a copy textual já extraída (tagline/posicionamento/vocabulário)."""
+    parts: list[str] = []
+    for nid in ("tagline", "positioning", "vocabulary"):
+        n = nodes.get(nid)
+        if n and n.value:
+            parts.append(" ".join(n.value) if isinstance(n.value, list) else str(n.value))
+    return " · ".join(parts).strip()
+
+
+def infer_strategic(corpus: str, llm_call) -> dict[str, Any]:
+    """
+    Infere a CAMADA ESTRATÉGICA (tom, pilares, arquétipo, público) a partir da
+    copy, via LLM. O LLM dá o VALOR; a confiança é calculada à parte (INFERÊNCIA).
+    Retorna {} se não houver LLM ou em qualquer falha (fluxo nunca quebra).
+    """
+    import json
+    ids = [a.id for a in archetypes.ARCHETYPES]
+    prompt = (
+        f'Com base SOMENTE nesta copy de uma marca, infira o essencial.\n'
+        f'Copy: """{corpus[:1500]}"""\n'
+        f'Responda APENAS um JSON válido com as chaves: '
+        f'{{"tone_of_voice": "<2-4 palavras>", "pillars": ["..","..",".."], '
+        f'"archetype": "<um id de: {ids}>", "audience": "<quem é o público>"}}.'
+    )
+    raw = llm_call(prompt, system="Responda só JSON válido, em pt-BR.", max_tokens=400)
+    if not raw:
+        return {}
+    try:
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    out: dict[str, Any] = {}
+    if isinstance(data.get("tone_of_voice"), str):
+        out["tone_of_voice"] = data["tone_of_voice"].strip()
+    if isinstance(data.get("pillars"), list) and data["pillars"]:
+        out["pillars"] = [str(p).strip() for p in data["pillars"]][:5]
+    if data.get("archetype") in ids:
+        out["archetype"] = data["archetype"]
+    if isinstance(data.get("audience"), str):
+        out["audience"] = data["audience"].strip()
+    return out
+
+
 def build_nodes(bundles: list[RawBundle],
-                previous: dict[str, Node] | None = None) -> dict[str, Node]:
+                previous: dict[str, Node] | None = None,
+                llm_call=None) -> dict[str, Node]:
     """
     Monta os nós: valor (via reconcile) + SINAIS observáveis. NÃO calcula
     confiança (scorer faz) e NÃO injeta impacto (motor faz).
@@ -812,6 +858,28 @@ def build_nodes(bundles: list[RawBundle],
                                    agreement=1.0, coverage=1.0)
 
         nodes[d.id] = node
+
+    # ---- enriquecimento ESTRATÉGICO via LLM (preenche ausentes) ----
+    if llm_call is not None:
+        corpus = _corpus_from_nodes(nodes)
+        if len(corpus) >= 30:
+            inferred = infer_strategic(corpus, llm_call)
+            for attr_id, value in inferred.items():
+                n = nodes.get(attr_id)
+                # só preenche ausentes/vazios e nunca atropela decisão humana
+                if n is None or n.is_sticky or n.value not in (None, "", []):
+                    continue
+                n.value = value
+                n.scope = Scope.INFERENCIA
+                n.status = Status.PALPITE
+                n.provenance.append(Provenance("llm:inferência", Scope.INFERENCIA,
+                                               value, "ok", "inferido da copy do site"))
+                # confiança de INFERÊNCIA: baixa de propósito -> vira pergunta
+                n.signals = Signals(ceiling=SCOPE_CEILING[Scope.INFERENCIA],
+                                    dispersion=0.0, agreement=0.75, coverage=0.5)
+                # arquétipo mantém as opções clicáveis como alternativas
+                if attr_id == "archetype" and not n.alternatives:
+                    n.alternatives = archetypes.as_options()
 
     return nodes
 
