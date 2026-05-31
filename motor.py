@@ -19,8 +19,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from schema import Node, Status
+from schema import Node, Signals, Status
 from scorer import score_all, score_node
+
+
+def _clone_signals(s: Signals) -> Signals:
+    return Signals(ceiling=s.ceiling, dispersion=s.dispersion,
+                   agreement=s.agreement, coverage=s.coverage)
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +95,22 @@ class Motor:
         self.metrics = Metrics()
         inject_impact(self.nodes)
         score_all(self.nodes)
+        # guarda os sinais-BASE (antes de qualquer postura) p/ reaplicação idempotente
+        self._base: dict[str, Signals] = {nid: _clone_signals(n.signals)
+                                          for nid, n in self.nodes.items()}
+
+    def replace_nodes(self, nodes: dict[str, Node]) -> None:
+        """
+        Troca os nós (ex.: re-extração) PRESERVANDO o estado do motor: tau,
+        métricas e postura. Recaptura a base e reaplica a postura (idempotente),
+        para que a confirmação humana e o progresso da entrevista não se percam.
+        """
+        self.nodes = nodes
+        inject_impact(self.nodes)
+        score_all(self.nodes)
+        self._base = {nid: _clone_signals(n.signals) for nid, n in self.nodes.items()}
+        if self.posture:
+            self.apply_posture(self.posture)
 
     # ------------------------------------------------------------------ score
     @staticmethod
@@ -111,7 +132,14 @@ class Motor:
                          teto; força revisão da estratégia.
         """
         self.posture = posture
-        for node in self.nodes.values():
+        for nid, node in self.nodes.items():
+            # nós já decididos pelo humano são imutáveis (não repondera)
+            if node.is_sticky:
+                continue
+            # SEMPRE parte da BASE -> aplicar a postura 2x não compõe (#7)
+            base = self._base.get(nid)
+            if base is not None:
+                node.signals = _clone_signals(base)
             s = node.signals
             if posture == "consistente":
                 s.dispersion = max(0.0, s.dispersion * 0.55)

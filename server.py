@@ -22,6 +22,7 @@ Bind em 0.0.0.0:$PORT.
 """
 from __future__ import annotations
 
+import base64
 import json
 import threading
 import urllib.parse
@@ -32,6 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+import carousel
 import connectors
 import store
 from config import Config
@@ -285,6 +287,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._motor_answer(body)
             if path == "/api/brandbook":
                 return self._brandbook_post(body)
+            if path == "/api/carousel":
+                return self._carousel(body)
+            if path == "/api/carousel/png":
+                return self._carousel_png(body)
             self._json({"error": "not_found", "path": path}, 404)
         except Exception as exc:
             self._json({"error": "internal", "detail": str(exc)}, 500)
@@ -329,9 +335,14 @@ class Handler(BaseHTTPRequestHandler):
 
         with _LOCK:
             sess["bundles"].append(bundle)
-            # (re)monta os nós com tudo que já chegou — respeitando monotonicidade
-            sess["nodes"] = connectors.build_nodes(sess["bundles"])
-            sess["motor"] = Motor(sess["nodes"])
+            # (re)monta os nós com tudo que já chegou — respeitando MONOTONICIDADE
+            # (passa os nós atuais p/ preservar confirmações do humano).
+            sess["nodes"] = connectors.build_nodes(sess["bundles"], previous=sess["nodes"])
+            if sess["motor"] is None:
+                sess["motor"] = Motor(sess["nodes"])
+            else:
+                # preserva tau / métricas / postura / progresso da entrevista
+                sess["motor"].replace_nodes(sess["nodes"])
 
         self._json({
             "session": sid,
@@ -393,6 +404,31 @@ class Handler(BaseHTTPRequestHandler):
         if not sess or not sess["nodes"]:
             return self._json({"error": "sem_extracao"}, 400)
         self._json({"session": sid, "sample_slide": build_sample_slide(sess["nodes"])})
+
+    # -- /api/carousel (gera) / /api/carousel/png (exporta) -----------------
+    def _carousel(self, body: dict[str, Any]) -> None:
+        sid = body.get("session", "")
+        sess = _get_session(sid)
+        if not sess or not sess["nodes"]:
+            return self._json({"error": "sem_extracao"}, 400)
+        values = {nid: n.value for nid, n in sess["nodes"].items()}
+        topic = (body.get("topic") or "").strip()
+        n_slides = int(body.get("n_slides", 5) or 5)
+        # passa o proxy de LLM só se houver chave (senão, copy heurística)
+        llm = call_llm if CFG.has_llm else None
+        result = carousel.build_carousel(values, topic, n_slides, llm)
+        self._json({"session": sid, **result})
+
+    def _carousel_png(self, body: dict[str, Any]) -> None:
+        html = body.get("html", "")
+        if not html:
+            return self._json({"error": "html_obrigatorio"}, 400)
+        try:
+            png = carousel.render_html_to_png(html)
+            self._json({"png_base64": base64.b64encode(png).decode()})
+        except Exception as exc:
+            self._json({"error": "render_falhou",
+                        "detail": f"{type(exc).__name__}: {exc}"}, 502)
 
     # -- /api/brandbook (GET/POST) ------------------------------------------
     def _brandbook_get(self, qs: dict[str, list[str]]) -> None:

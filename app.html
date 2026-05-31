@@ -74,6 +74,7 @@
       <span id="s3">3 · Entrevista</span>
       <span id="s4">4 · Recap</span>
       <span id="s5">5 · Amostra</span>
+      <span id="s6">6 · Carrossel</span>
     </div>
 
     <!-- 1 · ONBOARDING -->
@@ -140,9 +141,23 @@
         valores — não auditar uma lista.</p>
       <div class="slidebox"><iframe id="slideFrame" style="border:0;width:100%;height:100%"></iframe></div>
       <div class="row" style="justify-content:center;margin-top:16px">
-        <button class="primary" onclick="alert('Brand book aprovado ✔')">Está com a cara da marca ✔</button>
+        <button class="primary" onclick="show('carousel')">Está com a cara da marca ✔ — gerar carrossel</button>
         <button onclick="show('recap')">Ajustar algo</button>
       </div>
+    </section>
+
+    <!-- 6 · CARROSSEL -->
+    <section id="carousel" class="card hide">
+      <h2>Gerar carrossel</h2>
+      <p class="muted">Os slides são montados com as cores, tipografia, tom e
+        pilares confirmados. A copy usa o LLM se houver chave; senão, moldes.</p>
+      <div class="row">
+        <input id="carTopic" placeholder="tema do carrossel (ex.: Como escolher um parceiro de dados)">
+        <input id="carN" type="number" min="3" max="10" value="5" style="max-width:80px">
+        <button class="primary" onclick="genCarousel()">Gerar</button>
+      </div>
+      <div id="carStatus" class="muted" style="margin:8px 0"></div>
+      <div id="carSlides" style="display:flex;gap:14px;overflow-x:auto;padding:8px 0"></div>
     </section>
   </main>
 
@@ -181,10 +196,10 @@ async function api(path, opts){
   return r.json();
 }
 function show(id){
-  ['onboard','posture','interview','recap','sample'].forEach(s=>$('#'+s).classList.add('hide'));
+  ['onboard','posture','interview','recap','sample','carousel'].forEach(s=>$('#'+s).classList.add('hide'));
   $('#'+id).classList.remove('hide');
-  const map={onboard:'s1',posture:'s2',interview:'s3',recap:'s4',sample:'s5'};
-  ['s1','s2','s3','s4','s5'].forEach(s=>$('#'+s).classList.remove('on'));
+  const map={onboard:'s1',posture:'s2',interview:'s3',recap:'s4',sample:'s5',carousel:'s6'};
+  ['s1','s2','s3','s4','s5','s6'].forEach(s=>$('#'+s).classList.remove('on'));
   $('#'+map[id]).classList.add('on');
 }
 
@@ -311,6 +326,37 @@ async function showSample(){
   const html = res.sample_slide.html;
   const f=$('#slideFrame'); f.srcdoc=`<body style="margin:0">${html}</body>`;
   show('sample');
+}
+
+// ---- 6 · carrossel ----
+async function genCarousel(){
+  $('#carStatus').textContent='gerando…';
+  const res = await api('/api/carousel', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({session:SID, topic:$('#carTopic').value, n_slides:+$('#carN').value})});
+  if(res.error){ $('#carStatus').textContent='erro: '+res.error; return; }
+  $('#carStatus').textContent = `${res.n_slides} slides · copy: ${res.copy_source}`;
+  const box=$('#carSlides'); box.innerHTML='';
+  res.slides.forEach((s,i)=>{
+    const wrap=document.createElement('div');
+    wrap.style.cssText='flex:0 0 auto;text-align:center';
+    // iframe 270x270 mostrando o slide 1080 escalado (transform scale .25)
+    wrap.innerHTML = `<div style="width:270px;height:270px;overflow:hidden;border-radius:10px;border:1px solid var(--line)">
+        <iframe style="border:0;width:1080px;height:1080px;transform:scale(0.25);transform-origin:top left"
+                srcdoc="${s.html.replace(/"/g,'&quot;')}"></iframe></div>
+      <button style="margin-top:6px" onclick='dlPng(${i})'>baixar PNG</button>`;
+    box.appendChild(wrap);
+  });
+  window.__slides = res.slides;  // guarda p/ download
+}
+async function dlPng(i){
+  const s=window.__slides[i];
+  const res=await api('/api/carousel/png',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({html:s.html})});
+  if(res.error){ alert('render falhou: '+res.detail); return; }
+  const a=document.createElement('a');
+  a.href='data:image/png;base64,'+res.png_base64;
+  a.download=`slide_${i+1}.png`; a.click();
 }
 
 // ---- painel ----

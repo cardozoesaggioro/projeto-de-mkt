@@ -81,13 +81,19 @@ def reconcile(group: Group, provenance: list[Provenance]) -> dict[str, Any]:
         key=lambda p: (prio.get(p.scope, 0), freq[_norm(p.value)]),
     )
 
-    # agreement = fração de fontes utilizáveis que concordam com o vencedor.
+    # agreement = concordância com o vencedor, COM SUAVIZAÇÃO (Laplace).
+    # Sem suavização, 1 fonte daria 1.0 ("concorda consigo mesma") — corroboração
+    # falsa. Com prior 0.5 e pseudo-contagem 1: (matches+0.5)/(n+1).
+    #   n=1, match  -> 0.75   |  n=2 concordam -> 0.83  |  n=3 -> 0.875
+    #   n=2 discordam (1)     -> 0.50
     agree = sum(1 for p in usable if _norm(p.value) == _norm(winner.value))
-    agreement = agree / len(usable)
+    agreement = (agree + 0.5) / (len(usable) + 1)
 
     return {
         "value": winner.value,
         "scope": winner.scope,
         "agreement": round(agreement, 4),
         "winner_source": winner.source,
+        "raw_agreement": round(agree / len(usable), 4),  # sem suavização (debug)
+        "n_sources": len(usable),
     }

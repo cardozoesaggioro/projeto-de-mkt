@@ -38,6 +38,19 @@ SCOPE_CEILING: dict[Scope, float] = {
     Scope.INFERENCIA: 0.60,
 }
 
+# Peso de COBERTURA por escopo: o quanto cada fonte "preenche" a evidência.
+# Substitui o antigo `len(prov)/expected_sources` (arbitrário e que punia uma
+# leitura determinística única). Coverage = min(1, soma dos pesos). Assim:
+#   1 leitura determinística      -> 0.75 (autoritativa, não cai pela metade)
+#   1 inferência                  -> 0.40 (fraca sozinha)
+#   determinística + cv           -> 1.00 (corroboração)
+SCOPE_COVERAGE_WEIGHT: dict[Scope, float] = {
+    Scope.DETERMINISTICO: 0.75,
+    Scope.DECLARADO: 0.70,
+    Scope.CV: 0.65,
+    Scope.INFERENCIA: 0.40,
+}
+
 
 # ===========================================================================
 # RawBundle
@@ -574,11 +587,48 @@ def _hex(rgb: RGB) -> str:
     return "#{:02X}{:02X}{:02X}".format(*rgb)
 
 
-def build_nodes(bundles: list[RawBundle]) -> dict[str, Node]:
+def _hex_to_rgb(h: str) -> RGB | None:
+    h = str(h).lstrip("#")
+    if len(h) != 6:
+        return None
+    try:
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except ValueError:
+        return None
+
+
+def _perceptual_agreement(prov: list[Provenance], winner_hex: str) -> float:
+    """
+    Agreement de COR por proximidade perceptual (ΔE), não por igualdade de string.
+    Conta as fontes cujo valor está dentro de ΔE<=18 do vencedor. Suavizado
+    (Laplace) igual ao reconcile, para não dar 1.0 com fonte única.
+    Corrige o caso #16367A vs #18397E (mesma cor pro olho) virar discordância.
+    """
+    from color_cv import delta_e, rgb_to_lab, CLUSTER_THRESH
+
+    win_rgb = _hex_to_rgb(winner_hex)
+    if win_rgb is None:
+        return (0 + 0.5) / (len(prov) + 1)
+    win_lab = rgb_to_lab(win_rgb)
+    matches = 0
+    for p in prov:
+        rgb = _hex_to_rgb(p.value) if isinstance(p.value, str) else None
+        if rgb and delta_e(rgb_to_lab(rgb), win_lab) <= CLUSTER_THRESH:
+            matches += 1
+    return round((matches + 0.5) / (len(prov) + 1), 4)
+
+
+def build_nodes(bundles: list[RawBundle],
+                previous: dict[str, Node] | None = None) -> dict[str, Node]:
     """
     Monta os nós: valor (via reconcile) + SINAIS observáveis. NÃO calcula
     confiança (scorer faz) e NÃO injeta impacto (motor faz).
+
+    MONOTONICIDADE (regra #1): se `previous` traz um nó já tocado pelo humano
+    (confirmado/corrigido), o valor/estado dele são PEGAJOSOS — a re-extração
+    acumula proveniência nova mas não atropela a decisão humana.
     """
+    previous = previous or {}
     usable = [b for b in bundles if b.access_status in ("ok", "partial")]
     nodes: dict[str, Node] = {}
 
@@ -603,19 +653,25 @@ def build_nodes(bundles: list[RawBundle]) -> dict[str, Node]:
         # 3) montar SINAIS observáveis
         sig = Signals()
         if prov:
-            ceil = max(SCOPE_CEILING.get(p.scope, 0.6) for p in prov
-                       if p.access_status in ("ok", "partial"))
-            sig.ceiling = ceil
-            sig.agreement = res["agreement"]
-            sig.coverage = min(1.0, len(prov) / d.expected_sources)
+            sig.ceiling = max(SCOPE_CEILING.get(p.scope, 0.6) for p in prov)
+            # COBERTURA unificada: soma de pesos por escopo (autoridade + corroboração)
+            sig.coverage = min(1.0, sum(SCOPE_COVERAGE_WEIGHT.get(p.scope, 0.4)
+                                        for p in prov))
+            is_color = cv is not None or d.id == "secondary_color"
             if cv is not None:
-                # cor: dispersão e cobertura vêm do cluster perceptual
-                sig.dispersion = cv.dispersion
-                sig.coverage = max(sig.coverage, cv.coverage)
+                # COR primária: agreement perceptual (ΔE) + dispersão que inclui
+                # a FALTA DE RECORRÊNCIA entre imagens (sinal anti-lama real).
+                sig.agreement = _perceptual_agreement(prov, res["value"])
+                recurrence_gap = 1.0 - cv.coverage
+                sig.dispersion = round(max(cv.dispersion, recurrence_gap), 4)
+            elif d.id == "secondary_color":
+                sig.agreement = _perceptual_agreement(prov, res["value"])
+                sig.dispersion = 0.0
             else:
-                # textual: dispersão = fração de valores distintos
-                distinct = len({str(p.value).strip().lower() for p in prov})
-                sig.dispersion = 0.0 if len(prov) <= 1 else (distinct - 1) / len(prov)
+                # TEXTUAL/categórico: divergência fica SÓ no agreement (já suavizado
+                # no reconcile). Sem dispersão própria -> evita penalizar 2x (#4).
+                sig.agreement = res["agreement"]
+                sig.dispersion = 0.0
             status = Status.PALPITE
             value = res["value"]
             scope = res["scope"]
@@ -632,6 +688,17 @@ def build_nodes(bundles: list[RawBundle]) -> dict[str, Node]:
             status=status, signals=sig, provenance=prov,
             alternatives=alternatives, anchor=d.anchor, propagates=d.propagates,
         )
+
+        # MONOTONICIDADE: preserva a decisão humana de uma extração anterior.
+        prev = previous.get(d.id)
+        if prev is not None and prev.is_sticky:
+            node.value = prev.value
+            node.status = prev.status
+            node.scope = prev.scope
+            # valor humano = sinal máximo (teto cheio, sem dispersão)
+            node.signals = Signals(ceiling=1.0, dispersion=0.0,
+                                   agreement=1.0, coverage=1.0)
+
         nodes[d.id] = node
 
     return nodes
