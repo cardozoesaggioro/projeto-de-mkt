@@ -20,8 +20,12 @@
 
 ## 1. Deploy no Render (via Git)
 
-1. Suba este diretório para um repositório Git (GitHub/GitLab).
-2. No Render: **New → Web Service** → conecte o repo.
+> Já existe um repositório Git inicializado com commit inicial e um **blueprint
+> `render.yaml`** (Docker, healthcheck em `/api/health`, env vars com
+> `sync: false` para você preencher no painel sem vazar segredo).
+
+1. Adicione um remote e faça push (sua conta): `git remote add origin <repo>` + `git push -u origin main`.
+2. No Render: **New → Blueprint** (lê o `render.yaml`) — ou **New → Web Service** manual.
 3. Runtime: **Docker** (usa o `Dockerfile`) — ou Native (usa o `Procfile`).
 4. O Render injeta `PORT` automaticamente; o `server.py` já faz bind em
    `0.0.0.0:$PORT`. Não defina `PORT` à mão.
@@ -73,10 +77,15 @@
 5. **App Review**: solicite as permissões de `IG_SCOPES` (leva semanas).
    A conta IG do cliente precisa ser **Business/Creator** e estar ligada a uma
    Página do Facebook.
-6. Quando aprovado, implemente os dois `# TODO[REAL]` em `connectors.py` e
-   `server.py` (`_ig_callback`): troca `code`→`access_token` e leitura de mídia.
-   Hoje o `/auth/instagram/start` já monta a URL de consentimento quando as
-   credenciais existem; sem elas, responde 503 explicando o que falta.
+6. **Já está implementado** (dormente, guardado por credenciais):
+   - `/auth/instagram/start` monta a URL de consentimento e guarda o `state`.
+   - `/auth/instagram/callback` faz a troca `code`→token (curto→longo prazo) e
+     persiste o token no servidor (`store.ig_token`).
+   - A próxima `/api/extract/instagram` lê mídia/captions reais via Graph API.
+   Quando o App Review aprovar e as env vars estiverem no Render, isso "acende"
+   sozinho. **Pendência conhecida**: extrair paleta de cor das imagens do IG
+   precisa de `Pillow` (marcado `# TODO[REAL]` em `connectors._instagram_real`
+   e em `requirements.txt`) — hoje o IG contribui sinais Verbais (tom/vocabulário).
 
 ---
 
