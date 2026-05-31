@@ -251,12 +251,39 @@ def _site_real(url: str, sync_playwright) -> RawBundle:
         if positioning:
             raw["positioning"] = {"value": positioning[:200], "scope": Scope.DECLARADO}
 
-        # --- LOGO / og:image ---
-        og = page.evaluate(
-            "() => (document.querySelector('meta[property=\"og:image\"]')||{}).content || ''"
+        # --- LOGO (detecção real, não só og:image) ---
+        logo = page.evaluate(
+            """() => {
+                const abs = u => { try { return new URL(u, location.href).href; }
+                                   catch(e){ return u || ''; } };
+                const meta = el => ((el.getAttribute('alt')||'') + ' ' +
+                    (el.className&&el.className.baseVal!==undefined?el.className.baseVal:el.className||'') + ' ' +
+                    (el.id||'') + ' ' + (el.currentSrc||el.getAttribute('src')||'')).toLowerCase();
+                const inHeader = el => !!el.closest(
+                    'header, nav, [class*=header], [class*=navbar], [class*=topo], [id*=header]');
+                // <img> e <svg>: pontua por palavra 'logo', header e proximidade do topo
+                let best=null, bestS=-1, how='';
+                for (const el of document.querySelectorAll('img, svg')) {
+                    let s=0; const m=meta(el);
+                    if (m.includes('logo')) s+=10;
+                    if (inHeader(el)) s+=5;
+                    const r=el.getBoundingClientRect(); if (r.top>=0 && r.top<220) s+=2;
+                    const src = el.currentSrc || el.getAttribute('src') || '';
+                    if (el.tagName==='SVG' || el.tagName==='svg') { if(s>0 && s>bestS){bestS=s;best='[svg inline]';how='svg';} continue; }
+                    if (src && s>bestS) { bestS=s; best=src; how = m.includes('logo')?'img[logo]':(inHeader(el)?'img@header':'img'); }
+                }
+                if (best && bestS>=5) return {url: best.startsWith('[')?best:abs(best), how};
+                const icon = document.querySelector('link[rel~=\"icon\"], link[rel=\"apple-touch-icon\"]');
+                if (icon && icon.getAttribute('href')) return {url: abs(icon.getAttribute('href')), how:'favicon'};
+                if (best) return {url: abs(best), how};
+                const og = document.querySelector('meta[property=\"og:image\"]');
+                return og ? {url: abs(og.getAttribute('content')||''), how:'og:image'} : {url:'', how:'none'};
+            }"""
         )
-        if og:
-            raw["logo"] = {"value": og, "scope": Scope.DECLARADO}
+        logo_how = ""
+        if logo and logo.get("url"):
+            raw["logo"] = {"value": logo["url"], "scope": Scope.DECLARADO}
+            logo_how = logo.get("how", "")  # transparência: como achamos o logo
 
         # --- SCREENSHOT -> paleta via CV ---
         try:
@@ -268,8 +295,9 @@ def _site_real(url: str, sync_playwright) -> RawBundle:
         browser.close()
 
     status = "ok" if raw else "partial"
+    logo_note = f"; logo via {logo_how}" if logo_how else ""
     return RawBundle("site", status, raw=raw,
-                     detail=f"Playwright render OK ({len(raw)} sinais de {url}).")
+                     detail=f"Playwright render OK ({len(raw)} sinais de {url}{logo_note}).")
 
 
 GRAPH_API = "https://graph.facebook.com/v21.0"
