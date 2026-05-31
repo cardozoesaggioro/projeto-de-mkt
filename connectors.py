@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -124,6 +125,11 @@ def connect_site(url: str) -> RawBundle:
 
     Se o Playwright não estiver instalado, cai no mock (o fluxo nunca quebra).
     """
+    # Chave de segurança p/ ambientes com pouca RAM (ex.: Render free): com
+    # ENABLE_SITE_BROWSER=0 o site cai no mock e o Chromium nem é acionado.
+    if os.environ.get("ENABLE_SITE_BROWSER", "1").lower() not in ("1", "true", "yes", "on"):
+        return _site_mock()
+
     try:
         from playwright.sync_api import sync_playwright  # import preguiçoso
     except ImportError:

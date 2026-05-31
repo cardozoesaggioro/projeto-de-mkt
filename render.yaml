@@ -26,4 +26,9 @@ services:
         value: claude-sonnet-4-5
       - key: LLM_PROVIDER
         sync: false        # opcional: "anthropic" | "openai" (senão inferido do modelo)
+      # Conector de site (Chromium é pesado de RAM). No plano FREE (512MB) pode
+      # estourar memória; deixe "0" para o site cair no mock. Em plano com mais
+      # RAM (Starter+), troque para "1" para render real do site.
+      - key: ENABLE_SITE_BROWSER
+        value: "0"
     # PORT é injetado pelo Render — NÃO definir aqui.
