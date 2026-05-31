@@ -84,8 +84,11 @@
         ficam no servidor. Você pode rodar tudo com dados de exemplo (mock).</p>
       <div class="row"><input id="siteUrl" placeholder="https://site-da-empresa.com.br"
            value="https://exemplo.com.br"><button onclick="extract('site')">Conectar site</button></div>
-      <div class="row"><input id="igHandle" placeholder="@perfil_business"
-           value="@exemplo"><button onclick="connectIG()">Conectar Instagram</button></div>
+      <div class="row"><input id="igHandle" placeholder="@perfil_publico_business"
+           value="@exemplo"><button onclick="connectIG()">Analisar Instagram</button></div>
+      <div class="row" style="margin-top:-2px"><span class="muted" style="font-size:12px">
+        Analisa qualquer @ público Business/Creator (via Business Discovery).
+        <a href="/auth/instagram/start?session=admin" target="_blank" style="color:var(--acc)">Autorizar conta-lente</a> (admin, 1x).</span></div>
       <div class="row"><input type="file" id="uploadFile" accept="image/*">
            <button onclick="uploadFile()">Enviar logo/imagem (CV real)</button></div>
       <div class="row" style="margin-top:14px">
@@ -217,15 +220,8 @@ async function extract(source, payload){
   refreshPanel();
   return SID;
 }
-async function connectIG(){
-  // Com credenciais Meta: abre o OAuth real (Graph API). Sem elas: mock direto.
-  const igReady = HEALTH && /^pronto/.test(HEALTH.integrations.instagram);
-  if(igReady){
-    if(!SID){ SID = (await extract('site')) ? SID : SID; }  // garante sessão
-    window.open('/auth/instagram/start?session='+(SID||''), '_blank');
-    $('#connStatus').textContent = 'OAuth do Instagram aberto em nova aba — autorize e volte.';
-    return;
-  }
+function connectIG(){
+  // Business Discovery: analisa o @ digitado usando a conta-lente (autorizada 1x).
   extract('instagram', {handle: $('#igHandle').value});
 }
 async function uploadFile(){

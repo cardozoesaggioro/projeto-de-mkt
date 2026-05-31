@@ -53,6 +53,10 @@ _LOCK = threading.Lock()
 # Estados de OAuth pendentes (CSRF): state -> session. Em memória de propósito.
 _OAUTH_STATES: dict[str, str] = {}
 
+# Chave fixa da conta-LENTE (a da agência, autorizada 1x p/ Business Discovery).
+# O token dela serve para analisar qualquer @ público Business/Creator.
+LENS_KEY = "__lens__"
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -324,10 +328,10 @@ class Handler(BaseHTTPRequestHandler):
         if source == "site":
             bundle = connectors.connect_site(body.get("url", ""))
         elif source == "instagram":
-            tok = store.load_ig_token(sid) or {}
+            lens = store.load_ig_token(LENS_KEY) or {}
             bundle = connectors.connect_instagram(
                 body.get("handle", ""), has_meta_creds=CFG.has_meta_creds,
-                token=tok.get("access_token"), ig_user_id=tok.get("ig_user_id"))
+                lens_token=lens.get("access_token"), lens_ig_id=lens.get("ig_user_id"))
         elif source == "upload":
             bundle = connectors.connect_upload(body.get("files", []))
         else:
@@ -463,9 +467,9 @@ class Handler(BaseHTTPRequestHandler):
     # -- /auth/instagram/{start,callback} -----------------------------------
     def _ig_start(self, qs: dict[str, list[str]]) -> None:
         """
-        Início do OAuth 2.0 (conta Business/Creator do cliente, via Graph API).
-        Guarda o `state` (CSRF) ligado à sessão. Sem credenciais Meta, devolve
-        instruções honestas (não inventamos URL).
+        Início do OAuth 2.0 da conta-LENTE (a da agência), via Facebook Login.
+        Autorizada uma vez, ela alimenta o Business Discovery de qualquer @ público.
+        Guarda o `state` (CSRF). Sem credenciais Meta, devolve instruções honestas.
         """
         if not CFG.has_meta_creds:
             return self._json({
@@ -493,30 +497,45 @@ class Handler(BaseHTTPRequestHandler):
 
     def _ig_callback(self, qs: dict[str, list[str]]) -> None:
         """
-        Callback do OAuth — troca `code` por access_token (curto -> longo prazo)
-        e guarda o token (server-side). IMPLEMENTADO e guardado por credenciais:
-        só executa com META_APP_ID/SECRET/REDIRECT presentes e App Review aprovado.
+        Callback do OAuth da LENTE — troca `code` por access_token (curto -> longo
+        prazo), descobre o ig_user_id da lente e guarda tudo sob LENS_KEY. A partir
+        daí, qualquer @ público é analisado por Business Discovery.
         """
         if not CFG.has_meta_creds:
             return self._json({"error": "credenciais_meta_ausentes"}, 503)
         code = qs.get("code", [""])[0]
         state = qs.get("state", [""])[0]
         with _LOCK:
-            session = _OAUTH_STATES.pop(state, None)
-        if not code or not session:
+            valid = _OAUTH_STATES.pop(state, None)
+        if not code or valid is None:
             return self._json({"error": "state_ou_code_invalido"}, 400)
         try:
             access_token, expires_in = self._exchange_code_for_token(code)
             expires_at = (datetime.now(timezone.utc) +
                           timedelta(seconds=expires_in or 0)).isoformat() if expires_in else None
-            # ig_user_id é descoberto preguiçosamente no 1º fetch (connect_instagram).
-            store.save_ig_token(session, access_token, None, expires_at, _now_iso())
+            lens_ig_id = self._discover_ig_user_id(access_token)
+            store.save_ig_token(LENS_KEY, access_token, lens_ig_id, expires_at, _now_iso())
+            ok = "✔" if lens_ig_id else "⚠ (sem IG Business ligado a uma Página)"
             self._html(
-                f"<h2>Instagram conectado ✔</h2>"
-                f"<p>Sessão <code>{session}</code> autorizada. Pode fechar esta aba "
-                f"e voltar ao Ponto Zero — a próxima extração lerá a mídia real.</p>")
+                f"<h2>Conta-lente conectada {ok}</h2>"
+                f"<p>A lente foi autorizada. Agora é só digitar qualquer @ público "
+                f"Business/Creator no Ponto Zero que o sistema analisa. Pode fechar.</p>")
         except Exception as exc:
             self._json({"error": "falha_oauth", "detail": f"{type(exc).__name__}: {exc}"}, 502)
+
+    @staticmethod
+    def _discover_ig_user_id(token: str) -> str | None:
+        """Descobre o ig_user_id da lente: /me/accounts -> instagram_business_account."""
+        try:
+            accts = connectors._graph_get(
+                "me/accounts", {"fields": "instagram_business_account", "access_token": token})
+            for page in accts.get("data", []):
+                iba = page.get("instagram_business_account")
+                if iba and iba.get("id"):
+                    return iba["id"]
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def _exchange_code_for_token(code: str) -> tuple[str, int | None]:

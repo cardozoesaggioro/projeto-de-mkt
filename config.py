@@ -40,7 +40,7 @@ class Config:
     meta_app_id: str = ""
     meta_app_secret: str = ""
     meta_redirect_uri: str = ""
-    ig_scopes: str = "instagram_basic,pages_show_list,business_management"
+    ig_scopes: str = "instagram_basic,pages_show_list,pages_read_engagement,business_management"
 
     # LLM (proxy no servidor; usado p/ tom, pilares, frase das perguntas, arquétipos)
     llm_api_key: str = ""
@@ -58,7 +58,7 @@ class Config:
             meta_app_id=os.environ.get("META_APP_ID", ""),
             meta_app_secret=os.environ.get("META_APP_SECRET", ""),
             meta_redirect_uri=os.environ.get("META_REDIRECT_URI", ""),
-            ig_scopes=os.environ.get("IG_SCOPES", "instagram_basic,pages_show_list,business_management"),
+            ig_scopes=os.environ.get("IG_SCOPES", "instagram_basic,pages_show_list,pages_read_engagement,business_management"),
             llm_api_key=os.environ.get("LLM_API_KEY", ""),
             llm_model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
             llm_provider=os.environ.get("LLM_PROVIDER", "").strip().lower(),

@@ -18,7 +18,7 @@ services:
       - key: META_REDIRECT_URI
         sync: false        # ex.: https://app.mkt.cardozoesaggioro.com.br/auth/instagram/callback
       - key: IG_SCOPES
-        value: instagram_basic,pages_show_list,business_management
+        value: instagram_basic,pages_show_list,pages_read_engagement,business_management
       # --- LLM (preencher no painel) ---
       - key: LLM_API_KEY
         sync: false

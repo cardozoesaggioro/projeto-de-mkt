@@ -337,32 +337,37 @@ def _graph_get(path: str, params: dict[str, str], timeout: int = 15) -> dict[str
 
 
 def connect_instagram(handle: str, has_meta_creds: bool = False,
-                      token: str | None = None,
-                      ig_user_id: str | None = None) -> RawBundle:
+                      lens_token: str | None = None,
+                      lens_ig_id: str | None = None) -> RawBundle:
     """
-    Instagram: SOMENTE Graph API (graph.facebook.com) via OAuth 2.0 da conta
-    Business/Creator DO PRÓPRIO cliente. A Basic Display API foi desligada
-    (dez/2024) — NÃO usar. Conta pessoal não tem API.
+    Instagram via BUSINESS DISCOVERY (Graph API).
 
-    Três estados, todos honestos no `access_status`:
-      - COM token (OAuth concluído): leitura REAL de mídia/captions via Graph API.
-      - COM credenciais Meta, SEM token: 'unauthorized' (falta concluir o OAuth).
-      - SEM credenciais: mock 'partial' para o fluxo rodar sem segredo.
+    Modelo: UMA conta "lente" (a da agência) é autorizada uma vez e fornece o
+    `lens_token` + `lens_ig_id`. Com ela, consultamos QUALQUER perfil público
+    Business/Creator pelo @handle — o alvo NÃO precisa autorizar nada.
+
+    Estados honestos no `access_status`:
+      - COM lente + handle: consulta REAL via Business Discovery.
+      - COM credenciais Meta mas SEM lente: 'unauthorized' (autorizar a lente).
+      - SEM credenciais: mock 'partial' (demo sem segredo).
     """
-    # ---- caminho REAL (token presente) -----------------------------------
-    if token:
-        return _instagram_real(token, ig_user_id)
+    handle = (handle or "").lstrip("@").strip()
 
-    # ---- credenciais existem, mas OAuth não foi concluído ----------------
+    # ---- caminho REAL (lente autorizada) ---------------------------------
+    if lens_token and lens_ig_id and handle:
+        return _instagram_discovery(lens_token, lens_ig_id, handle)
+
+    # ---- credenciais existem, mas a lente não foi autorizada -------------
     if has_meta_creds:
         return RawBundle(source="instagram", access_status="unauthorized",
-                         detail="OAuth não concluído — acesse /auth/instagram/start.")
+                         detail="Conta-lente não autorizada — admin deve acessar "
+                                "/auth/instagram/start uma vez.")
 
     # ---- sem credenciais: mock parcial p/ o fluxo ------------------------
     return RawBundle(
         source="instagram",
         access_status="partial",
-        detail="MOCK — sem credenciais Meta; leitura real bloqueada (App Review pendente).",
+        detail="MOCK — sem credenciais Meta; Business Discovery indisponível.",
         raw={
             "image_palettes": [
                 [((24, 58, 128), 0.6), ((214, 176, 58), 0.4)],
@@ -373,55 +378,48 @@ def connect_instagram(handle: str, has_meta_creds: bool = False,
     )
 
 
-def _instagram_real(token: str, ig_user_id: str | None) -> RawBundle:
+def _instagram_discovery(lens_token: str, lens_ig_id: str, handle: str) -> RawBundle:
     """
-    Leitura real via Graph API. Já implementado e GUARDADO por token —
-    só executa após o OAuth + App Review aprovado.
-
-    1) Descobre o ig_user_id (se não veio): /me/accounts -> página ->
-       instagram_business_account.
-    2) /{ig-id}/media?fields=caption,media_type,media_url,permalink -> captions
-       e URLs de mídia.
-
-    Das captions extraímos sinais de Verbal (tom/vocabulário) como INFERENCIA.
-    # TODO[REAL]: baixar as media_url e rodar color_cv -> exige Pillow
-    #   (decodificar JPEG/PNG). Marcado em requirements.txt.
+    Business Discovery: lê o perfil público Business/Creator `@handle` usando a
+    conta-lente. Retorna bio (declarado), legendas (tom/vocabulário inferidos) e
+    paletas das imagens (CV -> cor). O alvo não autoriza nada.
     """
+    fields = (f"business_discovery.username({handle})"
+              "{name,biography,website,followers_count,media_count,"
+              "media{caption,media_type,media_url,like_count,comments_count,timestamp}}")
     try:
-        if not ig_user_id:
-            accts = _graph_get("me/accounts",
-                               {"fields": "instagram_business_account", "access_token": token})
-            pages = accts.get("data", [])
-            ig_user_id = next(
-                (p["instagram_business_account"]["id"] for p in pages
-                 if p.get("instagram_business_account")), None)
-            if not ig_user_id:
-                return RawBundle("instagram", "unauthorized",
-                                 detail="Nenhuma conta IG Business ligada a uma Página do Facebook.")
-
-        media = _graph_get(f"{ig_user_id}/media",
-                           {"fields": "caption,media_type,media_url,permalink",
-                            "limit": "25", "access_token": token})
-        items = media.get("data", [])
-        captions = [it.get("caption", "") for it in items if it.get("caption")]
-        media_urls = [it.get("media_url") for it in items if it.get("media_url")]
-
-        raw: dict[str, Any] = {"media_urls": media_urls}
-        if captions:
-            # sinais Verbais inferidos das legendas (valor; confiança é do scorer)
-            raw["tone_of_voice"] = {"value": _tone_from_captions(captions),
-                                    "scope": Scope.INFERENCIA}
-            raw["vocabulary"] = {"value": _top_words(captions), "scope": Scope.INFERENCIA}
-        # paleta de cor das imagens do IG (CV real) — alimenta a cor primária
-        palettes = _palettes_from_urls(media_urls[:8])
-        if palettes:
-            raw["image_palettes"] = palettes
-        status = "ok" if items else "partial"
-        return RawBundle("instagram", status, raw=raw,
-                         detail=f"Graph API: {len(items)} mídias, {len(captions)} captions.")
-    except Exception as exc:  # token expirado / permissão / rede
+        data = _graph_get(lens_ig_id, {"fields": fields, "access_token": lens_token})
+    except Exception as exc:  # alvo privado/pessoal/inexistente, token, rede
         return RawBundle("instagram", "unauthorized",
-                         detail=f"Falha na Graph API ({type(exc).__name__}: {exc}).")
+                         detail=f"Business Discovery falhou para @{handle} "
+                                f"({type(exc).__name__}). Alvo precisa ser Business/Creator público.")
+
+    bd = data.get("business_discovery")
+    if not bd:
+        return RawBundle("instagram", "partial",
+                         detail=f"@{handle}: sem dados (privada/pessoal/inexistente).")
+
+    media = (bd.get("media") or {}).get("data", [])
+    captions = [m.get("caption", "") for m in media if m.get("caption")]
+    media_urls = [m.get("media_url") for m in media if m.get("media_url")]
+
+    raw: dict[str, Any] = {"media_urls": media_urls}
+    bio = (bd.get("biography") or "").strip()
+    if bio:
+        # a bio é uma declaração do próprio perfil -> posicionamento (DECLARADO)
+        raw["positioning"] = {"value": bio[:200], "scope": Scope.DECLARADO}
+    if captions:
+        raw["tone_of_voice"] = {"value": _tone_from_captions(captions),
+                                "scope": Scope.INFERENCIA}
+        raw["vocabulary"] = {"value": _top_words(captions), "scope": Scope.INFERENCIA}
+    palettes = _palettes_from_urls(media_urls[:8])
+    if palettes:
+        raw["image_palettes"] = palettes
+
+    status = "ok" if media else "partial"
+    return RawBundle("instagram", status, raw=raw,
+                     detail=f"Business Discovery @{handle}: {len(media)} posts, "
+                            f"{len(captions)} legendas, {bd.get('followers_count','?')} seguidores.")
 
 
 def _palettes_from_urls(urls: list[str], timeout: int = 10) -> list[list[tuple[RGB, float]]]:
