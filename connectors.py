@@ -335,55 +335,156 @@ def _top_words(captions: list[str], n: int = 5) -> list[str]:
 
 def connect_upload(files: list[dict[str, Any]] | None = None) -> RawBundle:
     """
-    Upload (logo/doc): paleta EXATA por CV (Pillow).
+    Upload (logo/doc): paleta EXATA por CV (Pillow) E parse de PDF/DOCX.
     Cada item de `files` pode trazer:
-      - {"b64": "<base64 da imagem>"}  -> extrai paleta real
-      - {"path": "/caminho/arquivo"}   -> extrai paleta real (uso local)
+      - {"b64": "<base64>", "name": "logo.png"} -> imagem: extrai paleta real
+      - {"b64": "<base64>", "name": "brand.pdf"} -> documento: extrai copy
+      - {"path": "/caminho/arquivo", "name": ...} -> idem, lendo do disco
       - {"palette": [[(rgb,peso),...]]} -> paleta já pronta (mock/teste)
     Sem nenhum desses, devolve um mock coerente para o fluxo rodar.
-
-    # TODO[REAL]: parse de PDF/DOCX (pypdf) para extrair copy de brand guides.
     """
     files = files or []
     palettes: list[list[tuple[RGB, float]]] = []
-    real_count = 0
+    doc_signals: dict[str, Any] = {}
+    real_imgs = 0
+    real_docs = 0
     errors: list[str] = []
 
     for f in files:
+        name = str(f.get("name", "")).lower()
         try:
             if "palette" in f:
                 palettes.append([tuple(c) if not isinstance(c, tuple) else c
                                  for c in f["palette"]])
-            elif "b64" in f:
-                palettes.append(palette_from_image_bytes(base64.b64decode(f["b64"])))
-                real_count += 1
+                continue
+            # carrega os bytes (b64 ou path)
+            if "b64" in f:
+                data = base64.b64decode(f["b64"])
             elif "path" in f:
                 with open(f["path"], "rb") as fh:
-                    palettes.append(palette_from_image_bytes(fh.read()))
-                real_count += 1
-        except Exception as exc:  # arquivo inválido / Pillow ausente
-            errors.append(f"{type(exc).__name__}: {exc}")
+                    data = fh.read()
+            else:
+                continue
 
-    if not palettes:
+            if name.endswith((".pdf", ".docx")):
+                text = _text_from_document(data, name)
+                doc_signals.update(_doc_signals(text))  # brand guide = DECLARADO
+                real_docs += 1
+            else:
+                palettes.append(palette_from_image_bytes(data))
+                real_imgs += 1
+        except Exception as exc:  # arquivo inválido / dependência ausente
+            errors.append(f"{name or 'arquivo'}: {type(exc).__name__}: {exc}")
+
+    raw: dict[str, Any] = {}
+    if palettes:
+        raw["image_palettes"] = palettes
+        # cor do logo = cor mais proeminente entre as paletas válidas (defensivo:
+        # ignora entradas malformadas vindas do cliente).
+        valid = [c for pal in palettes for c in pal
+                 if isinstance(c, (list, tuple)) and len(c) == 2]
+        if valid:
+            logo_rgb = max(valid, key=lambda c: c[1])[0]
+            raw["color_logo"] = {"value": tuple(logo_rgb), "scope": Scope.CV}
+    raw.update(doc_signals)
+
+    if not raw:
         # mock default: um logo institucional
-        palettes = [[((22, 54, 122), 0.7), ((212, 175, 55), 0.3)]]
-        detail = "MOCK — paleta de exemplo (nenhum arquivo real enviado)."
-        logo_rgb = (212, 175, 55)
+        raw = {"image_palettes": [[((22, 54, 122), 0.7), ((212, 175, 55), 0.3)]],
+               "color_logo": {"value": (212, 175, 55), "scope": Scope.CV}}
+        detail = "MOCK — nenhum arquivo real enviado."
     else:
-        detail = (f"CV real em {real_count} arquivo(s)." if real_count
-                  else "paleta(s) fornecida(s).")
+        bits = []
+        if real_imgs:
+            bits.append(f"{real_imgs} imagem(ns) por CV")
+        if real_docs:
+            bits.append(f"{real_docs} documento(s) por parse")
+        detail = "Upload real: " + (", ".join(bits) or "paleta fornecida") + "."
         if errors:
             detail += f" Falhas: {'; '.join(errors)}"
-        # cor do logo = cor mais proeminente do 1º arquivo (escopo CV)
-        logo_rgb = max(palettes[0], key=lambda c: c[1])[0]
 
-    return RawBundle(
-        source="upload",
-        access_status="ok",
-        detail=detail,
-        raw={"image_palettes": palettes,
-             "color_logo": {"value": tuple(logo_rgb), "scope": Scope.CV}},
-    )
+    return RawBundle(source="upload", access_status="ok", detail=detail, raw=raw)
+
+
+def _text_from_document(data: bytes, name: str) -> str:
+    """Extrai texto de PDF (pypdf) ou DOCX (python-docx). Import preguiçoso."""
+    from io import BytesIO
+
+    if name.endswith(".pdf"):
+        from pypdf import PdfReader
+        reader = PdfReader(BytesIO(data))
+        return "\n".join((page.extract_text() or "") for page in reader.pages)
+    if name.endswith(".docx"):
+        import docx
+        document = docx.Document(BytesIO(data))
+        return "\n".join(p.text for p in document.paragraphs)
+    return ""
+
+
+def _doc_signals(text: str) -> dict[str, Any]:
+    """
+    Deriva sinais a partir da copy de um brand guide (fonte DECLARADA).
+    Heurísticas simples e transparentes — o VALOR vem do documento; a CONFIANÇA
+    é calculada à parte pelo scorer.
+    """
+    import re
+
+    sig: dict[str, Any] = {}
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    low = text.lower()
+
+    # tagline: linha curta e marcante perto do topo (ex.: slogan)
+    for ln in lines[:8]:
+        if 8 <= len(ln) <= 70 and ln[0].isupper() and not ln.endswith(":"):
+            sig["tagline"] = {"value": ln, "scope": Scope.DECLARADO}
+            break
+
+    # positioning: frase com verbos de posicionamento
+    for ln in lines:
+        if re.search(r"\b(somos|ajudamos|missão|transformamos|entregamos)\b", ln, re.I):
+            sig["positioning"] = {"value": ln[:200], "scope": Scope.DECLARADO}
+            break
+
+    # pilares: itens listados sob um título "pilares/valores/princípios"
+    pillars = _pillars_after_heading(lines, ("pilares", "valores", "princípios", "principios"))
+    if pillars:
+        sig["pillars"] = {"value": pillars[:5], "scope": Scope.DECLARADO}
+
+    # vocabulário: palavras recorrentes do documento
+    vocab = _top_words([text], n=6)
+    if vocab:
+        sig["vocabulary"] = {"value": vocab, "scope": Scope.DECLARADO}
+
+    # tom: heurística pelo vocabulário do guia
+    if any(w in low for w in ("evidência", "dado", "análise", "rigor")):
+        sig["tone_of_voice"] = {"value": "analítico e fundamentado", "scope": Scope.DECLARADO}
+    elif any(w in low for w in ("cuidado", "perto", "humano", "acolher")):
+        sig["tone_of_voice"] = {"value": "próximo e acolhedor", "scope": Scope.DECLARADO}
+
+    return sig
+
+
+def _pillars_after_heading(lines: list[str], headings: tuple[str, ...]) -> list[str]:
+    """Coleta itens de lista logo após um título de pilares/valores."""
+    out: list[str] = []
+    capture = False
+    for ln in lines:
+        low = ln.lower().rstrip(":")
+        if low in headings or any(low.startswith(h) for h in headings):
+            capture = True
+            continue
+        if capture:
+            item = ln.lstrip("-•*0123456789. ").strip()
+            # fim da lista: vazio, longo demais, ou cara de sentença (ponto/frase)
+            is_sentence = item.endswith(".") or len(item.split()) > 4
+            if not item or len(item) > 40 or is_sentence:
+                if out:
+                    break
+                continue
+            out.append(item)
+            if len(out) >= 5:
+                break
+    return out
 
 
 # Stubs explicitamente fora do v1 (exigem aprovação de Partner).
