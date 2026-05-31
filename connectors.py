@@ -148,6 +148,45 @@ def connect_site(url: str) -> RawBundle:
                          detail=f"Render falhou ({type(exc).__name__}: {exc}); sem dados do site.")
 
 
+def _clean_title(title: str) -> str:
+    """
+    Limpa o <title>: 'Página | Marca' ou 'Marca - proposta de valor'.
+    Escolhe o segmento mais DESCRITIVO (mais palavras), descartando o nome curto.
+    """
+    import re
+    parts = [p.strip() for p in re.split(r"\s*[|\-–—:·]\s*", title) if p.strip()]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    # o segmento mais descritivo tende a ser a frase (não o nome da marca):
+    # desempata por nº de palavras e, em empate, pelo comprimento.
+    return max(parts, key=lambda p: (len(p.split()), len(p)))
+
+
+def _site_copy(meta: dict[str, str]) -> tuple[str, str]:
+    """
+    Decide tagline e posicionamento a partir dos candidatos do DOM.
+    Tagline: h1 -> og:title -> hero -> <title> limpo -> h2 (primeiro não-vazio,
+    com cara de frase, não navegação). Posicionamento: meta/og description.
+    """
+    def usable(s: str) -> bool:
+        s = (s or "").strip()
+        # evita lixo de navegação/cookie e textos longos demais p/ tagline
+        return 6 <= len(s) <= 90 and not any(
+            w in s.lower() for w in ("cookie", "menu", "aceitar", "política de priv"))
+
+    candidates = [meta.get("h1", ""), meta.get("og_title", ""), meta.get("hero", ""),
+                  _clean_title(meta.get("title", "")), meta.get("h2", "")]
+    tagline = next((c.strip() for c in candidates if usable(c)), "")
+
+    positioning = (meta.get("meta_desc") or meta.get("og_desc") or "").strip()
+    # se não houver tagline mas houver título, usa o título inteiro como último recurso
+    if not tagline and meta.get("title"):
+        tagline = meta["title"].strip()[:90]
+    return tagline, positioning
+
+
 def _site_real(url: str, sync_playwright) -> RawBundle:
     """Render headless + extração determinística. Chamado por connect_site."""
     raw: dict[str, Any] = {}
@@ -178,19 +217,39 @@ def _site_real(url: str, sync_playwright) -> RawBundle:
             raw["typography"] = {"value": font.split(",")[0].strip(' "\''),
                                  "scope": Scope.DETERMINISTICO}
 
-        # --- COPY do DOM ---
-        def text(sel: str) -> str:
-            el = page.query_selector(sel)
-            return (el.inner_text().strip() if el else "")[:200]
-
-        h1 = text("h1")
-        desc = page.evaluate(
-            "() => (document.querySelector('meta[name=description]')||{}).content || ''"
+        # --- COPY do DOM (robusta) ---
+        # Colhe vários candidatos de uma vez; a escolha/limpeza é feita em Python.
+        meta = page.evaluate(
+            """() => {
+                const q = s => document.querySelector(s);
+                const t = el => el ? (el.innerText || el.textContent || '').trim() : '';
+                const attr = (s,a) => { const e=q(s); return e ? (e.getAttribute(a)||'') : ''; };
+                // hero: maior texto curto e proeminente perto do topo
+                let hero = '';
+                const cands = Array.from(document.querySelectorAll(
+                    'h1, h2, header h1, header h2, [class*=hero] *, [class*=banner] *'));
+                for (const el of cands) {
+                    const fs = parseFloat(getComputedStyle(el).fontSize) || 0;
+                    const txt = (el.innerText || '').trim().replace(/\\s+/g,' ');
+                    if (fs >= 24 && txt.length >= 8 && txt.length <= 90) { hero = txt; break; }
+                }
+                return {
+                    h1: t(q('h1')).replace(/\\s+/g,' '),
+                    h2: t(q('h2')).replace(/\\s+/g,' '),
+                    title: (document.title || '').trim(),
+                    og_title: attr('meta[property=\"og:title\"]','content'),
+                    og_desc:  attr('meta[property=\"og:description\"]','content'),
+                    meta_desc: attr('meta[name=description]','content'),
+                    hero: hero,
+                };
+            }"""
         )
-        if h1:
-            raw["tagline"] = {"value": h1, "scope": Scope.DECLARADO}
-        if desc:
-            raw["positioning"] = {"value": desc[:200], "scope": Scope.DECLARADO}
+
+        tagline, positioning = _site_copy(meta)
+        if tagline:
+            raw["tagline"] = {"value": tagline[:120], "scope": Scope.DECLARADO}
+        if positioning:
+            raw["positioning"] = {"value": positioning[:200], "scope": Scope.DECLARADO}
 
         # --- LOGO / og:image ---
         og = page.evaluate(
