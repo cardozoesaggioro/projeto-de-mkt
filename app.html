@@ -87,8 +87,8 @@
       <div class="row"><input id="igHandle" placeholder="@perfil_publico_business"
            value="@exemplo"><button onclick="connectIG()">Analisar Instagram</button></div>
       <div class="row" style="margin-top:-2px"><span class="muted" style="font-size:12px">
-        Analisa qualquer @ público Business/Creator (via Business Discovery).
-        <a href="/auth/instagram/start?session=admin" target="_blank" style="color:var(--acc)">Autorizar conta-lente</a> (admin, 1x).</span></div>
+        Requer conexão Meta (Business Discovery). <b>Indisponível no momento</b> —
+        para conteúdo do Instagram, use o <b>Upload</b> com prints/posts do cliente.</span></div>
       <div class="row"><input type="file" id="uploadFile" accept="image/*">
            <button onclick="uploadFile()">Enviar logo/imagem (CV real)</button></div>
       <div class="row" style="margin-top:14px">
@@ -221,8 +221,14 @@ async function extract(source, payload){
   return SID;
 }
 function connectIG(){
-  // Business Discovery: analisa o @ digitado usando a conta-lente (autorizada 1x).
-  extract('instagram', {handle: $('#igHandle').value});
+  // Sem conexão Meta, NÃO injeta mock numa análise real — orienta o usuário.
+  const igReady = HEALTH && /^pronto/.test(HEALTH.integrations.instagram);
+  if(!igReady){
+    $('#connStatus').textContent = 'Instagram requer conexão Meta (indisponível agora). '
+      + 'Use o Upload para enviar prints/posts do cliente.';
+    return;
+  }
+  extract('instagram', {handle: $('#igHandle').value});  // Business Discovery (lente)
 }
 async function uploadFile(){
   const inp=$('#uploadFile'); const file=inp.files && inp.files[0];
@@ -241,7 +247,10 @@ async function uploadFile(){
   refreshPanel();
 }
 async function seedAndGo(){
-  await extract('site'); await connectIG(); await extract('upload');
+  // modo exemplo: usa os mocks de todas as fontes p/ demonstrar o fluxo
+  await extract('site');
+  await extract('instagram', {handle: '@exemplo'});  // mock de exemplo (demo)
+  await extract('upload');
   show('posture');
 }
 
