@@ -85,8 +85,8 @@
            value="https://exemplo.com.br"><button onclick="extract('site')">Conectar site</button></div>
       <div class="row"><input id="igHandle" placeholder="@perfil_business"
            value="@exemplo"><button onclick="connectIG()">Conectar Instagram</button></div>
-      <div class="row"><input id="uploadName" placeholder="logo.png / brand.pdf (mock)">
-           <button onclick="extract('upload')">Enviar upload</button></div>
+      <div class="row"><input type="file" id="uploadFile" accept="image/*">
+           <button onclick="uploadFile()">Enviar logo/imagem (CV real)</button></div>
       <div class="row" style="margin-top:14px">
         <button class="primary" onclick="seedAndGo()">Usar exemplos e começar ▶</button>
         <span class="muted" id="connStatus"></span>
@@ -212,6 +212,22 @@ async function connectIG(){
     return;
   }
   extract('instagram', {handle: $('#igHandle').value});
+}
+async function uploadFile(){
+  const inp=$('#uploadFile'); const file=inp.files && inp.files[0];
+  if(!file){ $('#connStatus').textContent='escolha um arquivo de imagem'; return; }
+  const b64 = await new Promise(res=>{
+    const r=new FileReader();
+    r.onload=()=>res(String(r.result).split(',')[1]);  // tira o prefixo data:...;base64,
+    r.readAsDataURL(file);
+  });
+  const res = await api('/api/extract/upload', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({session:SID, files:[{b64, name:file.name}]})});
+  SID=res.session;
+  $('#connStatus').textContent = `upload ✔ · ${res.bundle.detail}`;
+  $('#bundles').innerHTML += `<div>• <b>upload</b> <span class="pill ok">${res.bundle.access_status}</span> ${res.bundle.detail}</div>`;
+  refreshPanel();
 }
 async function seedAndGo(){
   await extract('site'); await connectIG(); await extract('upload');

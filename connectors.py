@@ -16,6 +16,7 @@ Cada ponto que vira chamada real está marcado com `# TODO[REAL]` e a env var.
 """
 from __future__ import annotations
 
+import base64
 import json
 import urllib.parse
 import urllib.request
@@ -23,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import archetypes
-from color_cv import resolve_brand_color
+from color_cv import palette_from_image_bytes, resolve_brand_color
 from reconcile import reconcile
 from schema import Group, Node, Provenance, Scope, Signals, Status
 
@@ -177,13 +178,30 @@ def _instagram_real(token: str, ig_user_id: str | None) -> RawBundle:
             raw["tone_of_voice"] = {"value": _tone_from_captions(captions),
                                     "scope": Scope.INFERENCIA}
             raw["vocabulary"] = {"value": _top_words(captions), "scope": Scope.INFERENCIA}
-        # NOTA: image_palettes do IG ficam para quando Pillow estiver disponível.
+        # paleta de cor das imagens do IG (CV real) — alimenta a cor primária
+        palettes = _palettes_from_urls(media_urls[:8])
+        if palettes:
+            raw["image_palettes"] = palettes
         status = "ok" if items else "partial"
         return RawBundle("instagram", status, raw=raw,
                          detail=f"Graph API: {len(items)} mídias, {len(captions)} captions.")
     except Exception as exc:  # token expirado / permissão / rede
         return RawBundle("instagram", "unauthorized",
                          detail=f"Falha na Graph API ({type(exc).__name__}: {exc}).")
+
+
+def _palettes_from_urls(urls: list[str], timeout: int = 10) -> list[list[tuple[RGB, float]]]:
+    """Baixa cada imagem e extrai a paleta (CV). Falha de uma imagem não derruba."""
+    out: list[list[tuple[RGB, float]]] = []
+    for url in urls:
+        if not url:
+            continue
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                out.append(palette_from_image_bytes(resp.read()))
+        except Exception:
+            continue  # imagem indisponível / formato não suportado -> ignora
+    return out
 
 
 def _tone_from_captions(captions: list[str]) -> str:
@@ -209,23 +227,54 @@ def _top_words(captions: list[str], n: int = 5) -> list[str]:
 
 def connect_upload(files: list[dict[str, Any]] | None = None) -> RawBundle:
     """
-    Upload (logo/doc): paleta EXATA por CV; parse de PDF/DOCX.
-    Aqui aceitamos paletas já extraídas (mock); o real roda CV no arquivo.
+    Upload (logo/doc): paleta EXATA por CV (Pillow).
+    Cada item de `files` pode trazer:
+      - {"b64": "<base64 da imagem>"}  -> extrai paleta real
+      - {"path": "/caminho/arquivo"}   -> extrai paleta real (uso local)
+      - {"palette": [[(rgb,peso),...]]} -> paleta já pronta (mock/teste)
+    Sem nenhum desses, devolve um mock coerente para o fluxo rodar.
 
-    # TODO[REAL]: extrair paleta exata do arquivo (CV) e fazer parse de PDF/DOCX
-    #   (sem env var; processamento local no servidor).
+    # TODO[REAL]: parse de PDF/DOCX (pypdf) para extrair copy de brand guides.
     """
     files = files or []
-    palettes = [f["palette"] for f in files if "palette" in f]
+    palettes: list[list[tuple[RGB, float]]] = []
+    real_count = 0
+    errors: list[str] = []
+
+    for f in files:
+        try:
+            if "palette" in f:
+                palettes.append([tuple(c) if not isinstance(c, tuple) else c
+                                 for c in f["palette"]])
+            elif "b64" in f:
+                palettes.append(palette_from_image_bytes(base64.b64decode(f["b64"])))
+                real_count += 1
+            elif "path" in f:
+                with open(f["path"], "rb") as fh:
+                    palettes.append(palette_from_image_bytes(fh.read()))
+                real_count += 1
+        except Exception as exc:  # arquivo inválido / Pillow ausente
+            errors.append(f"{type(exc).__name__}: {exc}")
+
     if not palettes:
         # mock default: um logo institucional
         palettes = [[((22, 54, 122), 0.7), ((212, 175, 55), 0.3)]]
+        detail = "MOCK — paleta de exemplo (nenhum arquivo real enviado)."
+        logo_rgb = (212, 175, 55)
+    else:
+        detail = (f"CV real em {real_count} arquivo(s)." if real_count
+                  else "paleta(s) fornecida(s).")
+        if errors:
+            detail += f" Falhas: {'; '.join(errors)}"
+        # cor do logo = cor mais proeminente do 1º arquivo (escopo CV)
+        logo_rgb = max(palettes[0], key=lambda c: c[1])[0]
+
     return RawBundle(
         source="upload",
         access_status="ok",
-        detail="MOCK — paleta de exemplo (CV não rodou em arquivo real).",
+        detail=detail,
         raw={"image_palettes": palettes,
-             "color_logo": {"value": (212, 175, 55), "scope": Scope.CV}},
+             "color_logo": {"value": tuple(logo_rgb), "scope": Scope.CV}},
     )
 
 

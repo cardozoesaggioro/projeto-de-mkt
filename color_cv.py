@@ -174,3 +174,48 @@ def resolve_brand_color(
         n_total_images=n_total,
         alternatives=alternatives,
     )
+
+
+# ---------------------------------------------------------------------------
+# Extração de paleta de um ARQUIVO de imagem (CV real, via Pillow)
+# ---------------------------------------------------------------------------
+def palette_from_image_bytes(
+    data: bytes, max_colors: int = 6, resize: int = 160, drop_near_white: bool = True,
+) -> list[tuple[RGB, float]]:
+    """
+    Extrai a paleta dominante de uma imagem (bytes) como [(rgb, peso)], onde o
+    peso é a fração de pixels daquela cor. É a entrada para resolve_brand_color.
+
+    Determinístico: redimensiona, quantiza (mediana de cortes) e conta pixels.
+    Import do Pillow é PREGUIÇOSO — o módulo segue importável sem a dependência.
+
+    # NOTA: descarta quase-branco/quase-preto por padrão (fundos/texto) para não
+    #   poluir a cor de marca; mantém se a imagem for majoritariamente neutra.
+    """
+    from io import BytesIO
+
+    try:
+        from PIL import Image
+    except ImportError as exc:  # Pillow ausente -> erro claro (connector trata)
+        raise RuntimeError("Pillow não instalado (pip install pillow)") from exc
+
+    img = Image.open(BytesIO(data)).convert("RGB")
+    img.thumbnail((resize, resize))
+    quant = img.quantize(colors=max_colors, method=Image.Quantize.MEDIANCUT)
+    pal = quant.getpalette() or []
+    counts = quant.getcolors() or []  # [(count, index), ...]
+    total = sum(c for c, _ in counts) or 1
+
+    palette: list[tuple[RGB, float]] = []
+    for count, idx in counts:
+        r, g, b = pal[idx * 3 : idx * 3 + 3]
+        if drop_near_white and (min(r, g, b) > 238 or max(r, g, b) < 16):
+            continue  # fundo branco / texto preto
+        palette.append(((r, g, b), round(count / total, 4)))
+
+    # se filtramos tudo (imagem neutra), devolve as cores cruas mesmo
+    if not palette:
+        for count, idx in counts:
+            r, g, b = pal[idx * 3 : idx * 3 + 3]
+            palette.append(((r, g, b), round(count / total, 4)))
+    return palette
