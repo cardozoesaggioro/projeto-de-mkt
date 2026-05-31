@@ -4,6 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Ponto Zero — brand book</title>
+<!-- fontes sugeridas: para renderizar as opções de tipografia NA própria fonte -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter&family=Poppins&family=Montserrat&family=Roboto&family=Open+Sans&family=Lato&family=Playfair+Display&family=Merriweather&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --line:#2a313c; --ink:#e6edf3;
@@ -93,6 +96,11 @@
            <button onclick="uploadProfile()">Analisar print de perfil (IG)</button></div>
       <div class="row"><input type="file" id="uploadFile" accept="image/*">
            <button onclick="uploadFile()">Enviar logo/imagem (CV real)</button></div>
+      <div class="row"><input type="file" id="manualDoc" accept=".pdf,.docx">
+           <button onclick="uploadManual()">Manual de marca / documento (PDF/DOCX)</button></div>
+      <div class="row" style="margin-top:-2px"><span class="muted" style="font-size:12px">
+        Tem um manual de marca, mesmo antigo? Ajuda muito — extraímos tom, pilares,
+        cores e posicionamento dele.</span></div>
       <div class="row"><input type="file" id="refShots" accept="image/*" multiple>
            <button onclick="uploadRefs()">Referências de estilo — base de TODOS (admin)</button></div>
       <div id="refStatus" class="muted" style="font-size:12px"></div>
@@ -169,25 +177,31 @@
     </section>
   </main>
 
-  <!-- ============ PAINEL DO MOTOR AO VIVO ============ -->
+  <!-- ============ PAINEL DA MARCA (amigável) ============ -->
   <aside>
     <div class="card">
-      <h2>Motor ao vivo</h2>
-      <div class="panel-metric"><span>tau (limiar)</span><b id="mTau">—</b></div>
-      <div class="bar" style="margin-bottom:10px"><i id="mTauBar" style="width:0"></i></div>
-      <div class="panel-metric"><span>postura</span><b id="mPosture">—</b></div>
-      <div class="panel-metric"><span>suficiência</span><b id="mSuf">—</b></div>
-      <div class="panel-metric"><span>distinção capturada</span><b id="mDist">—</b></div>
-      <div class="panel-metric"><span>perguntas</span><b id="mQ">0</b></div>
-      <div class="panel-metric"><span>hit rate</span><b id="mHit">—</b></div>
-      <div class="panel-metric"><span>falsa confiança</span><b id="mFalse">—</b></div>
+      <h2>Sua marca</h2>
+      <div class="panel-metric"><span>Mapeada</span><b id="mProgress">—</b></div>
+      <div class="bar" style="margin-bottom:12px"><i id="mProgressBar" style="width:0"></i></div>
+      <div class="panel-metric"><span>Atributos prontos</span><b id="mReady">—</b></div>
+      <div class="panel-metric"><span>Confiança média</span><b id="mConf">—</b></div>
+      <div class="panel-metric"><span>Perguntas respondidas</span><b id="mAnswered">0</b></div>
+      <div class="panel-metric"><span>Situação</span><b id="mStatus">—</b></div>
+      <button class="primary" style="width:100%;margin-top:12px" onclick="shareResult()">Compartilhar resultado</button>
+      <details style="margin-top:10px">
+        <summary class="muted" style="font-size:12px;cursor:pointer">detalhes técnicos</summary>
+        <div class="panel-metric" style="margin-top:6px"><span>tau (limiar)</span><b id="mTau">—</b></div>
+        <div class="panel-metric"><span>postura</span><b id="mPosture">—</b></div>
+        <div class="panel-metric"><span>acertos do palpite</span><b id="mHit">—</b></div>
+        <div class="panel-metric"><span>correções</span><b id="mFalse">—</b></div>
+      </details>
     </div>
     <div class="card">
-      <h2>Fila por score</h2>
-      <div id="queue" class="muted">conecte uma fonte…</div>
+      <h2>O que ainda falta confirmar</h2>
+      <div id="queue" class="muted">conecte uma fonte para começar…</div>
     </div>
     <div class="card">
-      <h2>Saúde</h2>
+      <h2>Fontes &amp; status</h2>
       <div id="health" class="muted">…</div>
     </div>
   </aside>
@@ -251,6 +265,18 @@ async function uploadFile(){
   $('#bundles').innerHTML += `<div>• <b>upload</b> <span class="pill ok">${res.bundle.access_status}</span> ${res.bundle.detail}</div>`;
   refreshPanel();
 }
+async function uploadManual(){
+  const inp=$('#manualDoc'); const file=inp.files && inp.files[0];
+  if(!file){ $('#connStatus').textContent='escolha um PDF ou DOCX'; return; }
+  $('#connStatus').textContent='lendo o manual de marca…';
+  const b64=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.readAsDataURL(file);});
+  const res=await api('/api/extract/upload',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({session:SID, files:[{b64, name:file.name}]})});
+  SID=res.session;
+  $('#connStatus').textContent = `manual ✔ · ${res.bundle.detail}`;
+  $('#bundles').innerHTML += `<div>• <b>manual de marca</b> <span class="pill ok">${res.bundle.access_status}</span> ${res.bundle.detail}</div>`;
+  refreshPanel();
+}
 async function uploadRefs(){
   const inp=$('#refShots'); const fs=inp.files;
   if(!fs || !fs.length){ $('#refStatus').textContent='escolha 1+ imagens de referência'; return; }
@@ -310,6 +336,7 @@ function renderQuestion(q){
   $('#qImpact').textContent = 'impacto '+q.impact;
   const opts = $('#qOptions'); opts.innerHTML='';
   const isColor = q.tipo==='cor';
+  const isFont = q.tipo==='fonte';
 
   // opções normalizadas (palpite -> fontes -> catálogo). kind define o rótulo.
   const HINT = {palpite:'palpite do sistema', fonte:'visto nas fontes', catalogo:'opção'};
@@ -317,7 +344,9 @@ function renderQuestion(q){
     const tag = o.hint || HINT[o.kind] || 'opção';
     const action = (o.kind==='palpite') ? 'confirm' : 'correct';
     const val = (o.kind==='palpite') ? null : o.value;   // confirm mantém o palpite
-    opts.appendChild(optBtn(o.label, tag, ()=>answer(q.node_id, action, val), isColor?o.value:null));
+    // fonte: renderiza o rótulo NA própria fonte (preview real)
+    opts.appendChild(optBtn(o.label, tag, ()=>answer(q.node_id, action, val),
+                            isColor?o.value:null, isFont?o.value:null));
   });
 
   // campo "outro": livre p/ aberto/fonte; hex p/ cor; lista separa por vírgula
@@ -330,12 +359,14 @@ function renderQuestion(q){
   $('#qProv').innerHTML = '<b>proveniência:</b> ' + ((q.provenance||[]).map(p=>
      `${p.source}(${p.scope}/${p.access_status})`).join(' · ') || '—');
 }
-function optBtn(title, tag, fn, colorHex){
+function optBtn(title, tag, fn, colorHex, fontFamily){
   const b=document.createElement('button'); b.className='opt';
   const hex = colorHex && /^#([0-9A-F]{6})$/i.test(colorHex) ? colorHex
             : (/^#([0-9A-F]{6})$/i.test(title) ? title : null);
   const sw = hex ? `<span class="swatch" style="background:${hex}"></span>` : '';
-  b.innerHTML = `<b>${sw}${title}</b><div class="t">${tag}</div>`;
+  // se for fonte, mostra o rótulo escrito naquela fonte
+  const style = fontFamily ? ` style="font-family:'${fontFamily}',sans-serif;font-size:18px"` : '';
+  b.innerHTML = `<b${style}>${sw}${title}</b><div class="t">${tag}</div>`;
   b.onclick=fn; return b;
 }
 async function answer(node_id, action, value){
@@ -419,28 +450,57 @@ async function refreshPanel(){
   const res = await api('/api/motor/next?session='+SID);
   if(res.snapshot){ LAST=res.snapshot; renderPanel(res.snapshot); }
 }
+function confLabel(c){ return c>=0.7?'Alta':c>=0.4?'Média':'Baixa'; }
 function renderPanel(s){
   if(!s) return;
-  $('#mTau').textContent=s.tau;
-  $('#mTauBar').style.width=Math.min(100,(s.tau/0.6*100))+'%';
-  $('#mPosture').textContent=s.postura||'—';
-  $('#mSuf').textContent=s.suficiente?'atingida':'não';
-  $('#mDist').textContent=s.distincao_capturada;
-  $('#mQ').textContent=s.metrics.perguntas_ate_suficiencia;
-  $('#mHit').textContent=(s.metrics.hit_rate*100|0)+'%';
-  $('#mFalse').textContent=(s.metrics.taxa_falsa_confianca*100|0)+'%';
-  $('#queue').innerHTML = s.fila.slice(0,8).map(n=>{
-    const w=(n.score/0.7*100)|0;
-    return `<div style="margin:6px 0"><div style="display:flex;justify-content:space-between">
-      <span>${n.label}</span><span class="muted">${n.score}</span></div>
-      <div class="bar"><i style="width:${Math.min(100,w)}%"></i></div></div>`;
-  }).join('');
+  const fila = s.fila||[];
+  const total = fila.length || 1;
+  // "pronto" = confirmado/corrigido pelo humano OU confiança alta
+  const ready = fila.filter(n=>['confirmado','corrigido'].includes(n.status) || n.confidence>=0.7).length;
+  const avg = fila.reduce((a,n)=>a+(n.confidence||0),0)/total;
+  const pct = Math.round(ready/total*100);
+
+  $('#mProgress').textContent = pct+'%';
+  $('#mProgressBar').style.width = pct+'%';
+  $('#mReady').textContent = `${ready} de ${total}`;
+  $('#mConf').textContent = `${confLabel(avg)} (${Math.round(avg*100)}%)`;
+  $('#mAnswered').textContent = s.metrics.perguntas_ate_suficiencia;
+  $('#mStatus').textContent = s.suficiente ? 'Pronto para gerar ✔' : 'Coletando…';
+  // detalhes técnicos (recolhidos)
+  $('#mTau').textContent = s.tau;
+  $('#mPosture').textContent = s.postura||'—';
+  $('#mHit').textContent = (s.metrics.hit_rate*100|0)+'%';
+  $('#mFalse').textContent = s.metrics.corrects ?? '—';
+
+  // o que falta confirmar = itens não-prontos, por prioridade, com confiança amigável
+  const pend = fila.filter(n=>!(['confirmado','corrigido'].includes(n.status) || n.confidence>=0.7)).slice(0,6);
+  $('#queue').innerHTML = pend.length ? pend.map(n=>{
+    const c=Math.round((n.confidence||0)*100);
+    return `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between">
+      <span>${n.label}</span><span class="muted">${confLabel(n.confidence)}</span></div>
+      <div class="bar"><i style="width:${c}%"></i></div></div>`;
+  }).join('') : '<span class="ok">Tudo confirmado ou com alta confiança ✔</span>';
+}
+async function shareResult(){
+  if(!SID){ alert('Conecte uma fonte primeiro.'); return; }
+  const bb = await api('/api/brandbook?session='+SID);
+  const linhas = (bb.nodes||[]).filter(n=>n.value!=null).map(n=>{
+    const v = Array.isArray(n.value)? n.value.join(', ') : n.value;
+    return `• ${n.label}: ${v}  (${confLabel(n.confidence)})`;
+  });
+  const txt = `Brand book — Ponto Zero\n\n`+linhas.join('\n')+`\n\nGerado em ${new Date().toLocaleString('pt-BR')}`;
+  try{
+    if(navigator.share){ await navigator.share({title:'Brand book', text:txt}); }
+    else { await navigator.clipboard.writeText(txt); $('#mStatus').textContent='copiado ✔'; alert('Resultado copiado para a área de transferência.'); }
+  }catch(e){ await navigator.clipboard.writeText(txt).catch(()=>{}); alert('Resultado copiado.'); }
 }
 async function loadHealth(){
   const h=await api('/api/health'); HEALTH=h;
-  $('#health').innerHTML = Object.entries(h.integrations).map(([k,v])=>
-     `<div>• <b>${k}</b>: ${v}</div>`).join('') +
-     (h.missing_credentials.length?`<div style="margin-top:8px" class="pill warn">faltam ${h.missing_credentials.length} credenciais</div>`:'');
+  const NOME={site:'Site',instagram:'Instagram',upload:'Upload (logo/doc/print)',llm:'IA (texto e visão)',linkedin:'LinkedIn',tiktok:'TikTok'};
+  $('#health').innerHTML = Object.entries(h.integrations).map(([k,v])=>{
+     const ok=/^pronto/.test(v); const cls=ok?'ok':'warn';
+     return `<div style="margin:3px 0">• <b>${NOME[k]||k}</b>: <span class="${cls}">${v}</span></div>`;
+  }).join('');
 }
 loadHealth();
 </script>
