@@ -5,6 +5,7 @@ pillow>=11.0            # extrai paleta exata de uploads e imagens do Instagram 
 playwright>=1.49        # render headless do site -> CSS computado / copy / logo / paleta
 pypdf>=5.0             # parse de PDF (copy de brand guides)
 python-docx>=1.1       # parse de DOCX (copy de brand guides)
+pymupdf>=1.24          # renderiza PDF-screenshot (print de perfil) em imagem p/ CV+visão
 
 #
 # NOTA: o Playwright precisa do navegador instalado. Local: `playwright install

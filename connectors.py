@@ -516,6 +516,7 @@ def connect_upload(files: list[dict[str, Any]] | None = None,
     palettes: list[list[tuple[RGB, float]]] = []
     doc_signals: dict[str, Any] = {}
     vision_signals: dict[str, Any] = {}
+    brand_colors: list[str] = []   # cores de marca nomeadas pela visão (alternativas)
     real_imgs = 0
     real_docs = 0
     real_shots = 0
@@ -537,20 +538,41 @@ def connect_upload(files: list[dict[str, Any]] | None = None,
             else:
                 continue
 
-            if name.endswith((".pdf", ".docx")):
-                text = _text_from_document(data, name)
-                doc_signals.update(_doc_signals(text))  # brand guide = DECLARADO
+            if name.endswith(".docx"):
+                doc_signals.update(_doc_signals(_text_from_document(data, name)))
                 real_docs += 1
+            elif name.endswith(".pdf"):
+                text = _text_from_document(data, name)
+                if len(text.strip()) >= 80:
+                    # PDF com texto = brand guide -> copy declarada
+                    doc_signals.update(_doc_signals(text))
+                    real_docs += 1
+                else:
+                    # PDF-SCREENSHOT (sem texto): renderiza páginas -> CV (fatiado) + visão
+                    pages = _pdf_to_images(data, max_pages=4)
+                    for png in pages:
+                        palettes.extend(_tile_palettes(png))  # células p/ recorrência
+                    real_imgs += len(pages)
+                    if vision_call is not None and f.get("vision") and pages:
+                        vis = vision_call(base64.b64encode(pages[0]).decode()) or {}
+                        if vis:
+                            brand_colors.extend(vis.pop("colors", []) or [])
+                            vision_signals.update(vis)
+                            real_shots += 1
             else:
-                palettes.append(palette_from_image_bytes(data))  # cor sempre por CV
-                real_imgs += 1
-                # PRINT de perfil: lê bio/legendas por visão (texto que o CV não vê)
+                # PRINT de perfil (vision): fatia em células p/ achar a cor recorrente
                 if vision_call is not None and f.get("vision"):
+                    palettes.extend(_tile_palettes(data))
+                    real_imgs += 1
                     b64 = f.get("b64") or base64.b64encode(data).decode()
                     vis = vision_call(b64) or {}
                     if vis:
+                        brand_colors.extend(vis.pop("colors", []) or [])
                         vision_signals.update(vis)
                         real_shots += 1
+                else:
+                    palettes.append(palette_from_image_bytes(data))  # logo/imagem única
+                    real_imgs += 1
         except Exception as exc:  # arquivo inválido / dependência ausente
             errors.append(f"{name or 'arquivo'}: {type(exc).__name__}: {exc}")
 
@@ -569,6 +591,8 @@ def connect_upload(files: list[dict[str, Any]] | None = None,
     for k, v in vision_signals.items():
         if v not in (None, "", []):
             raw[k] = {"value": v, "scope": Scope.INFERENCIA}
+    if brand_colors:
+        raw["brand_colors"] = brand_colors  # cores de marca (viram opções de cor)
 
     if not raw:
         # mock default: um logo institucional
@@ -588,6 +612,48 @@ def connect_upload(files: list[dict[str, Any]] | None = None,
             detail += f" Falhas: {'; '.join(errors)}"
 
     return RawBundle(source="upload", access_status="ok", detail=detail, raw=raw)
+
+
+def _tile_palettes(png: bytes, cols: int = 3, rows: int = 4) -> list[list[tuple[RGB, float]]]:
+    """
+    Fatia um screenshot (ex.: grid de perfil) em células e devolve a paleta de
+    cada uma. Assim a cor de MARCA que RECORRE entre células vence, e fotos/ruído
+    (que variam célula a célula) não dominam — anti-lama por recorrência.
+    """
+    from io import BytesIO
+    from PIL import Image
+    try:
+        im = Image.open(BytesIO(png)).convert("RGB")
+    except Exception:
+        return []
+    w, h = im.size
+    out: list[list[tuple[RGB, float]]] = []
+    for r in range(rows):
+        for c in range(cols):
+            box = (c * w // cols, r * h // rows, (c + 1) * w // cols, (r + 1) * h // rows)
+            buf = BytesIO()
+            im.crop(box).save(buf, "PNG")
+            pal = palette_from_image_bytes(buf.getvalue())
+            if pal:
+                out.append(pal)
+    return out
+
+
+def _pdf_to_images(data: bytes, max_pages: int = 4, dpi: int = 120) -> list[bytes]:
+    """Renderiza páginas de um PDF em PNG (para PDF-screenshot). Usa PyMuPDF."""
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        return []
+    out: list[bytes] = []
+    try:
+        doc = fitz.open(stream=data, filetype="pdf")
+        for page in doc[:max_pages]:
+            out.append(page.get_pixmap(dpi=dpi).tobytes("png"))
+        doc.close()
+    except Exception:
+        return out
+    return out
 
 
 def _text_from_document(data: bytes, name: str) -> str:
@@ -879,6 +945,8 @@ def build_nodes(bundles: list[RawBundle],
     """
     previous = previous or {}
     usable = [b for b in bundles if b.access_status in ("ok", "partial")]
+    # cores de marca nomeadas pela visão (entram como opções nas perguntas de cor)
+    brand_colors_all = [c for b in usable for c in (b.raw.get("brand_colors") or [])]
     nodes: dict[str, Node] = {}
 
     for d in ATTR_DEFS:
@@ -946,6 +1014,12 @@ def build_nodes(bundles: list[RawBundle],
             status=status, signals=sig, provenance=prov,
             alternatives=alternatives, anchor=d.anchor, propagates=d.propagates,
         )
+
+        # cor: junta as cores de marca da visão como OPÇÕES clicáveis (anti-lama:
+        # quando o CV vem incerto do grid, o humano clica a cor certa).
+        if d.is_color and brand_colors_all:
+            extra = [c for c in brand_colors_all if str(c).upper() != str(node.value).upper()]
+            node.alternatives = list(dict.fromkeys(list(node.alternatives or []) + extra))
 
         # MONOTONICIDADE: preserva a decisão humana de uma extração anterior.
         prev = previous.get(d.id)

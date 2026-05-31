@@ -195,9 +195,11 @@ def extract_profile_signals(image_b64: str) -> dict[str, Any]:
     """
     prompt = (
         "Esta é uma captura de tela de um perfil de marca no Instagram. Leia o "
-        "texto visível (nome, bio, legendas, destaques) e responda APENAS um JSON: "
+        "texto visível (nome, bio, legendas, destaques) e identifique as cores da "
+        "MARCA (do logo/identidade, IGNORANDO fotos de pessoas). Responda APENAS JSON: "
         '{"positioning":"<bio/proposta de valor>","tone_of_voice":"<2-4 palavras>",'
-        '"vocabulary":["palavra","palavra"],"audience":"<público provável>"}. '
+        '"vocabulary":["palavra","palavra"],"audience":"<público provável>",'
+        '"colors":["#RRGGBB cor primária da marca","#RRGGBB secundária"]}. '
         "Se algo não aparecer, use string vazia ou lista vazia."
     )
     raw = call_vision(image_b64, prompt)
@@ -217,6 +219,12 @@ def extract_profile_signals(image_b64: str) -> dict[str, Any]:
         out["vocabulary"] = [str(v).strip() for v in data["vocabulary"] if str(v).strip()][:6]
     if isinstance(data.get("audience"), str) and data["audience"].strip():
         out["audience"] = data["audience"].strip()
+    if isinstance(data.get("colors"), list):
+        import re as _re
+        cols = [c for c in data["colors"]
+                if isinstance(c, str) and _re.fullmatch(r"#[0-9A-Fa-f]{6}", c.strip())]
+        if cols:
+            out["colors"] = [c.strip().upper() for c in cols][:3]
     return out
 
 
