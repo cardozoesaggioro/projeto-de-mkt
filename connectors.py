@@ -288,17 +288,20 @@ def _site_real(url: str, sync_playwright) -> RawBundle:
                 const inHeader = el => !!el.closest(
                     'header, nav, [class*=header], [class*=navbar], [class*=topo], [id*=header]');
                 // <img> e <svg>: pontua por palavra 'logo', header e proximidade do topo
-                let best=null, bestS=-1, how='';
+                let best=null, bestS=-1, how='', bestEl=null;
                 for (const el of document.querySelectorAll('img, svg')) {
                     let s=0; const m=meta(el);
                     if (m.includes('logo')) s+=10;
                     if (inHeader(el)) s+=5;
                     const r=el.getBoundingClientRect(); if (r.top>=0 && r.top<220) s+=2;
                     const src = el.currentSrc || el.getAttribute('src') || '';
-                    if (el.tagName==='SVG' || el.tagName==='svg') { if(s>0 && s>bestS){bestS=s;best='[svg inline]';how='svg';} continue; }
-                    if (src && s>bestS) { bestS=s; best=src; how = m.includes('logo')?'img[logo]':(inHeader(el)?'img@header':'img'); }
+                    if (el.tagName==='SVG' || el.tagName==='svg') { if(s>0 && s>bestS){bestS=s;best='[svg inline]';how='svg';bestEl=el;} continue; }
+                    if (src && s>bestS) { bestS=s; best=src; how = m.includes('logo')?'img[logo]':(inHeader(el)?'img@header':'img'); bestEl=el; }
                 }
-                if (best && bestS>=5) return {url: best.startsWith('[')?best:abs(best), how};
+                if (best && bestS>=5) {
+                    if (bestEl) bestEl.setAttribute('data-pz-logo','1');  // p/ screenshot do logo
+                    return {url: best.startsWith('[')?best:abs(best), how};
+                }
                 const icon = document.querySelector('link[rel~=\"icon\"], link[rel=\"apple-touch-icon\"]');
                 if (icon && icon.getAttribute('href')) return {url: abs(icon.getAttribute('href')), how:'favicon'};
                 if (best) return {url: abs(best), how};
@@ -307,16 +310,31 @@ def _site_real(url: str, sync_playwright) -> RawBundle:
             }"""
         )
         logo_how = ""
+        logo_palette = None
         if logo and logo.get("url"):
             raw["logo"] = {"value": logo["url"], "scope": Scope.DECLARADO}
             logo_how = logo.get("how", "")  # transparência: como achamos o logo
+            # COR DO LOGO: screenshot do elemento do logo (qualquer formato, inclusive
+            # SVG) -> paleta. É a fonte mais autoritativa de cor de marca.
+            if logo_how in ("img[logo]", "img@header", "img", "svg"):
+                try:
+                    el = page.query_selector('[data-pz-logo="1"]')
+                    if el:
+                        logo_palette = palette_from_image_bytes(el.screenshot(timeout=5000))
+                        logo_how += "+cor"
+                except Exception:
+                    logo_palette = None
 
-        # --- SCREENSHOT -> paleta via CV ---
+        # --- SCREENSHOT -> paleta via CV (página + logo) ---
+        palettes: list[list[tuple[RGB, float]]] = []
         try:
-            shot = page.screenshot(full_page=False)
-            raw["image_palettes"] = [palette_from_image_bytes(shot)]
+            palettes.append(palette_from_image_bytes(page.screenshot(full_page=False)))
         except Exception:
             pass
+        if logo_palette:
+            palettes.append(logo_palette)  # logo entra como cor de marca forte
+        if palettes:
+            raw["image_palettes"] = palettes
 
         browser.close()
 

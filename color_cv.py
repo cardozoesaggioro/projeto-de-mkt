@@ -199,7 +199,14 @@ def palette_from_image_bytes(
     except ImportError as exc:  # Pillow ausente -> erro claro (connector trata)
         raise RuntimeError("Pillow não instalado (pip install pillow)") from exc
 
-    img = Image.open(BytesIO(data)).convert("RGB")
+    im = Image.open(BytesIO(data))
+    # logos costumam ter alfa: compõe sobre BRANCO (senão convert('RGB') vira preto)
+    if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+        im = im.convert("RGBA")
+        bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
+        img = Image.alpha_composite(bg, im).convert("RGB")
+    else:
+        img = im.convert("RGB")
     img.thumbnail((resize, resize))
     quant = img.quantize(colors=max_colors, method=Image.Quantize.MEDIANCUT)
     pal = quant.getpalette() or []
