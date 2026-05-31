@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 import carousel
+import catalog
 import connectors
 import store
 from config import Config
@@ -394,11 +395,15 @@ class Handler(BaseHTTPRequestHandler):
         q = motor.next_question()
         if q is None:
             return None  # suficiência
+        # opções clicáveis normalizadas (palpite + fontes + catálogo)
+        opt = catalog.build_options(q.id, q.value, q.alternatives)
         return {
             "node_id": q.id, "label": q.label, "group": q.group.value,
             "pergunta": llm_phrase_question(q),
-            "palpite": q.value, "status": q.status.value,
-            "alternativas": q.alternatives,
+            "palpite": q.value, "palpite_label": opt["palpite_label"],
+            "status": q.status.value,
+            "tipo": opt["tipo"], "opcoes": opt["opcoes"],
+            "alternativas": q.alternatives,  # legado (compat)
             "confidence": round(q.confidence, 4), "impact": round(q.impact, 4),
             "score": round(motor.node_score(q), 4),
             "provenance": [p.to_dict() for p in q.provenance],

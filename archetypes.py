@@ -64,3 +64,11 @@ def as_options(limit: int = 12) -> list[dict[str, str]]:
         {"id": a.id, "label": a.nome, "promessa": a.promessa, "tom": a.tom_exemplo}
         for a in ARCHETYPES[:limit]
     ]
+
+
+def as_options_norm(limit: int = 12) -> list[dict[str, str]]:
+    """Opções normalizadas {value,label,hint} para o catálogo de respostas."""
+    return [
+        {"value": a.id, "label": a.nome, "hint": a.promessa}
+        for a in ARCHETYPES[:limit]
+    ]

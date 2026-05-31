@@ -259,27 +259,36 @@ function renderQuestion(q){
   if(!q){ buildRecap(); return; }   // suficiência -> recap
   show('interview');
   $('#qText').textContent = q.pergunta;
-  $('#qGroup').textContent = '◆ '+q.group;
+  $('#qGroup').textContent = '◆ '+q.group+'  ·  '+(q.tipo||'aberto');
   $('#qConf').textContent = 'confiança '+(q.confidence*100|0)+'%';
   $('#qImpact').textContent = 'impacto '+q.impact;
   const opts = $('#qOptions'); opts.innerHTML='';
-  // palpite do sistema (se houver) vira a 1a opção clicável
-  if(q.palpite !== null && q.palpite !== undefined){
-    opts.appendChild(optBtn(fmt(q.palpite), 'palpite do sistema', ()=>answer(q.node_id,'confirm',null)));
-  }
-  // alternativas (reconhecimento, não evocação)
-  (q.alternativas||[]).forEach(a=>{
-    opts.appendChild(optBtn(fmt(a), 'alternativa', ()=>answer(q.node_id,'correct',a)));
+  const isColor = q.tipo==='cor';
+
+  // opções normalizadas (palpite -> fontes -> catálogo). kind define o rótulo.
+  const HINT = {palpite:'palpite do sistema', fonte:'visto nas fontes', catalogo:'opção'};
+  (q.opcoes||[]).forEach(o=>{
+    const tag = o.hint || HINT[o.kind] || 'opção';
+    const action = (o.kind==='palpite') ? 'confirm' : 'correct';
+    const val = (o.kind==='palpite') ? null : o.value;   // confirm mantém o palpite
+    opts.appendChild(optBtn(o.label, tag, ()=>answer(q.node_id, action, val), isColor?o.value:null));
   });
+
+  // campo "outro": livre p/ aberto/fonte; hex p/ cor; lista separa por vírgula
+  const lista = q.tipo==='lista';
+  $('#qOther').placeholder = isColor ? 'outra cor (#RRGGBB)…'
+      : lista ? 'outros valores (separados por vírgula)…' : 'outro valor…';
   $('#qOther').value='';
   $('#qOther').dataset.node = q.node_id;
-  // proveniência honesta
-  $('#qProv').innerHTML = '<b>proveniência:</b> ' + (q.provenance||[]).map(p=>
-     `${p.source}(${p.scope}/${p.access_status})`).join(' · ') || '—';
+  $('#qOther').dataset.lista = lista ? '1' : '';
+  $('#qProv').innerHTML = '<b>proveniência:</b> ' + ((q.provenance||[]).map(p=>
+     `${p.source}(${p.scope}/${p.access_status})`).join(' · ') || '—');
 }
-function optBtn(title, tag, fn){
+function optBtn(title, tag, fn, colorHex){
   const b=document.createElement('button'); b.className='opt';
-  const sw = /^#([0-9A-F]{6})$/i.test(title) ? `<span class="swatch" style="background:${title}"></span>`:'';
+  const hex = colorHex && /^#([0-9A-F]{6})$/i.test(colorHex) ? colorHex
+            : (/^#([0-9A-F]{6})$/i.test(title) ? title : null);
+  const sw = hex ? `<span class="swatch" style="background:${hex}"></span>` : '';
   b.innerHTML = `<b>${sw}${title}</b><div class="t">${tag}</div>`;
   b.onclick=fn; return b;
 }
@@ -291,8 +300,10 @@ async function answer(node_id, action, value){
   renderQuestion(res.next);
 }
 function answerOther(){
-  const v=$('#qOther').value.trim(); if(!v) return;
-  answer($('#qOther').dataset.node, 'correct', v);
+  const inp=$('#qOther'); const v=inp.value.trim(); if(!v) return;
+  // lista -> vira array (separado por vírgula)
+  const val = inp.dataset.lista==='1' ? v.split(',').map(s=>s.trim()).filter(Boolean) : v;
+  answer(inp.dataset.node, 'correct', val);
 }
 
 // ---- 4 · recap ----
