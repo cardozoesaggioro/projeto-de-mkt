@@ -78,6 +78,7 @@
       <span id="s4">4 · Recap</span>
       <span id="s5">5 · Amostra</span>
       <span id="s6">6 · Carrossel</span>
+      <span id="s7">7 · Manual</span>
     </div>
 
     <!-- 1 · ONBOARDING -->
@@ -145,7 +146,8 @@
       <div class="row" style="margin-top:14px">
         <input id="brandId" placeholder="id da marca (ex.: cardozoesaggioro)" style="max-width:280px">
         <button onclick="saveBook()">Salvar</button>
-        <button class="primary" onclick="showSample()">Ver slide de amostra ▶</button>
+        <button onclick="showSample()">Ver slide de amostra</button>
+        <button class="primary" onclick="show('manual');genManual()">Gerar manual completo ▶</button>
         <span class="muted" id="saveStatus"></span>
       </div>
     </section>
@@ -174,6 +176,20 @@
       </div>
       <div id="carStatus" class="muted" style="margin:8px 0"></div>
       <div id="carSlides" style="display:flex;gap:14px;overflow-x:auto;padding:8px 0"></div>
+    </section>
+
+    <!-- 7 · MANUAL -->
+    <section id="manual" class="card hide">
+      <h2>Manual de marca + parecer</h2>
+      <p class="muted">Documento final completo, escrito a partir dos valores
+        confirmados (identidade visual, verbal, estratégia e parecer analítico).</p>
+      <div class="row">
+        <input id="manualName" placeholder="nome da marca (ex.: Cardozo & Saggioro)">
+        <button class="primary" onclick="genManual()">Gerar manual completo</button>
+        <button onclick="printManual()">Imprimir / salvar PDF</button>
+        <span class="muted" id="manualStatus"></span>
+      </div>
+      <iframe id="manualFrame" style="border:1px solid var(--line);border-radius:10px;width:100%;height:70vh;background:#fff;margin-top:12px"></iframe>
     </section>
   </main>
 
@@ -218,10 +234,10 @@ async function api(path, opts){
   return r.json();
 }
 function show(id){
-  ['onboard','posture','interview','recap','sample','carousel'].forEach(s=>$('#'+s).classList.add('hide'));
+  ['onboard','posture','interview','recap','sample','carousel','manual'].forEach(s=>$('#'+s).classList.add('hide'));
   $('#'+id).classList.remove('hide');
-  const map={onboard:'s1',posture:'s2',interview:'s3',recap:'s4',sample:'s5',carousel:'s6'};
-  ['s1','s2','s3','s4','s5','s6'].forEach(s=>$('#'+s).classList.remove('on'));
+  const map={onboard:'s1',posture:'s2',interview:'s3',recap:'s4',sample:'s5',carousel:'s6',manual:'s7'};
+  ['s1','s2','s3','s4','s5','s6','s7'].forEach(s=>$('#'+s).classList.remove('on'));
   $('#'+map[id]).classList.add('on');
 }
 
@@ -441,6 +457,24 @@ async function dlPng(i){
   const a=document.createElement('a');
   a.href='data:image/png;base64,'+res.png_base64;
   a.download=`slide_${i+1}.png`; a.click();
+}
+
+// ---- 7 · manual de marca ----
+async function genManual(){
+  if(!SID){ $('#manualStatus').textContent='conecte uma fonte primeiro'; return; }
+  $('#manualStatus').textContent='gerando o parecer e o manual…';
+  const name = encodeURIComponent($('#manualName').value||'');
+  const res = await api('/api/manual?session='+SID+'&name='+name);
+  if(res.error){ $('#manualStatus').textContent='erro: '+(res.detail||res.error); return; }
+  window.__manualHtml = res.html;
+  $('#manualFrame').srcdoc = res.html;
+  $('#manualStatus').textContent = `manual de “${res.name}” pronto ✔`;
+}
+function printManual(){
+  if(!window.__manualHtml){ $('#manualStatus').textContent='gere o manual primeiro'; return; }
+  const w = window.open('', '_blank');
+  w.document.open(); w.document.write(window.__manualHtml); w.document.close();
+  w.focus(); setTimeout(()=>w.print(), 600);  // usuário escolhe "Salvar como PDF"
 }
 
 // ---- painel ----

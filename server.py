@@ -36,6 +36,7 @@ from typing import Any
 import carousel
 import catalog
 import connectors
+import manual as manual_mod
 import store
 from config import Config
 from motor import Motor
@@ -277,6 +278,60 @@ def extract_style_reference(image_b64: str) -> dict[str, Any]:
     return out
 
 
+def _manual_prose_fallback(values: dict[str, Any]) -> dict[str, Any]:
+    """Prosa do manual sem LLM — templates a partir dos valores."""
+    return {
+        "sobre": values.get("positioning") or "Marca em construção de identidade.",
+        "voz_diretrizes": {
+            "resumo": f"Comunicar com tom {values.get('tone_of_voice', 'profissional')}.",
+            "fazer": ["Manter consistência de tom e termos", "Ser claro e direto"],
+            "evitar": ["Jargão desnecessário", "Mudar de tom entre canais"]},
+        "estrategia": "Produzir conteúdo orientado pelos pilares definidos, para o público-alvo.",
+        "parecer": "Parecer analítico completo requer a IA (LLM_API_KEY). "
+                   "Confirme os atributos de baixa confiança para fortalecer a marca.",
+        "recomendacoes": ["Confirmar atributos de baixa confiança",
+                          "Consolidar a paleta e a tipografia em todos os canais"],
+    }
+
+
+def compose_manual_prose(values: dict[str, Any], style_refs: list) -> dict[str, Any]:
+    """A IA escreve as seções em prosa do manual + o parecer. Fallback sem LLM."""
+    ctx = {k: v for k, v in values.items() if v not in (None, "", [])}
+    prompt = (
+        "Você é consultor sênior de branding. Com base no brand book (JSON) abaixo, "
+        "escreva as seções de um manual de marca profissional e um parecer analítico, "
+        "em pt-BR, tom consultivo e objetivo (sem inventar fatos além do JSON).\n"
+        f"Brand book: {json.dumps(ctx, ensure_ascii=False)}\n"
+        "Responda APENAS um JSON com as chaves: "
+        '{"sobre":"<1-2 parágrafos sobre a marca>",'
+        '"voz_diretrizes":{"resumo":"<como falar>","fazer":["..","..",".."],"evitar":["..","..",".."]},'
+        '"estrategia":"<parágrafo sobre estratégia de conteúdo a partir dos pilares/público>",'
+        '"parecer":"<parágrafo: coerência da marca, forças e lacunas observadas>",'
+        '"recomendacoes":["..","..",".."]}.'
+    )
+    raw = call_llm(prompt, system="Responda só JSON válido, em pt-BR.", max_tokens=900)
+    if raw:
+        try:
+            raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            data = json.loads(raw)
+            if isinstance(data, dict) and data.get("sobre"):
+                return data
+        except Exception:
+            pass
+    return _manual_prose_fallback(values)
+
+
+def _derive_brand_name(values: dict[str, Any]) -> str:
+    """Nome da marca p/ a capa: do tagline (1º segmento) ou genérico."""
+    import re
+    tag = values.get("tagline") or ""
+    if tag:
+        parts = [p.strip() for p in re.split(r"\s*[|\-–—:]\s*", str(tag)) if p.strip()]
+        if parts:
+            return parts[0][:60]
+    return "Sua Marca"
+
+
 def llm_phrase_question(node: Node) -> str:
     """Frase humana da pergunta — via LLM se houver chave, senão heurística."""
     if not CFG.has_llm:
@@ -394,6 +449,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._brandbook_get(qs)
             if path == "/api/sample":
                 return self._sample(qs.get("session", [""])[0])
+            if path == "/api/manual":
+                return self._manual(qs)
             if path == "/auth/instagram/start":
                 return self._ig_start(qs)
             if path == "/auth/instagram/callback":
@@ -542,6 +599,19 @@ class Handler(BaseHTTPRequestHandler):
         if not sess or not sess["nodes"]:
             return self._json({"error": "sem_extracao"}, 400)
         self._json({"session": sid, "sample_slide": build_sample_slide(sess["nodes"])})
+
+    # -- /api/manual (parecer + manual de marca completo) -------------------
+    def _manual(self, qs: dict[str, list[str]]) -> None:
+        sid = qs.get("session", [""])[0]
+        sess = _get_session(sid)
+        if not sess or not sess["nodes"]:
+            return self._json({"error": "sem_extracao"}, 400)
+        payload = brandbook_payload(sess)
+        values = {n["id"]: n["value"] for n in payload["nodes"]}
+        name = (qs.get("name", [""])[0] or "").strip() or _derive_brand_name(values)
+        prose = compose_manual_prose(values, payload.get("style_references", []))
+        html = manual_mod.render_manual(name, payload, prose)
+        self._json({"name": name, "html": html})
 
     # -- /api/carousel (gera) / /api/carousel/png (exporta) -----------------
     def _carousel(self, body: dict[str, Any]) -> None:
