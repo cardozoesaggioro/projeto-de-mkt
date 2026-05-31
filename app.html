@@ -88,7 +88,9 @@
            value="@exemplo"><button onclick="connectIG()">Analisar Instagram</button></div>
       <div class="row" style="margin-top:-2px"><span class="muted" style="font-size:12px">
         Requer conexão Meta (Business Discovery). <b>Indisponível no momento</b> —
-        para conteúdo do Instagram, use o <b>Upload</b> com prints/posts do cliente.</span></div>
+        para conteúdo do Instagram, suba <b>prints do perfil</b> abaixo. 👇</span></div>
+      <div class="row"><input type="file" id="profileShot" accept="image/*">
+           <button onclick="uploadProfile()">Analisar print de perfil (IG)</button></div>
       <div class="row"><input type="file" id="uploadFile" accept="image/*">
            <button onclick="uploadFile()">Enviar logo/imagem (CV real)</button></div>
       <div class="row" style="margin-top:14px">
@@ -244,6 +246,22 @@ async function uploadFile(){
   SID=res.session;
   $('#connStatus').textContent = `upload ✔ · ${res.bundle.detail}`;
   $('#bundles').innerHTML += `<div>• <b>upload</b> <span class="pill ok">${res.bundle.access_status}</span> ${res.bundle.detail}</div>`;
+  refreshPanel();
+}
+async function uploadProfile(){
+  const inp=$('#profileShot'); const file=inp.files && inp.files[0];
+  if(!file){ $('#connStatus').textContent='escolha um print do perfil'; return; }
+  $('#connStatus').textContent='lendo o print (cor + texto por visão)…';
+  const b64 = await new Promise(res=>{
+    const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]);
+    r.readAsDataURL(file);
+  });
+  const res = await api('/api/extract/upload', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({session:SID, files:[{b64, name:file.name, vision:true}]})});
+  SID=res.session;
+  $('#connStatus').textContent = `print ✔ · ${res.bundle.detail}`;
+  $('#bundles').innerHTML += `<div>• <b>print de perfil</b> <span class="pill ok">${res.bundle.access_status}</span> ${res.bundle.detail}</div>`;
   refreshPanel();
 }
 async function seedAndGo(){

@@ -156,6 +156,70 @@ def call_llm(prompt: str, system: str = "", max_tokens: int = 120) -> str | None
         return None
 
 
+def call_vision(image_b64: str, prompt: str, system: str = "",
+                max_tokens: int = 500) -> str | None:
+    """
+    Lê uma IMAGEM via LLM multimodal (OpenAI gpt-4o*/4o-mini). Usado para ler
+    prints de perfil (bio/legendas) que o CV não captura. Falha -> None (o
+    fluxo nunca quebra; a cor por CV continua valendo).
+    """
+    if not CFG.has_llm or CFG.resolved_provider != "openai":
+        return None
+    try:
+        data = _http_json(
+            "https://api.openai.com/v1/chat/completions",
+            body={
+                "model": CFG.llm_model, "max_tokens": max_tokens,
+                "messages": [
+                    {"role": "system", "content": system or "Responda só JSON, pt-BR."},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url",
+                         "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                    ]},
+                ],
+            },
+            headers={"authorization": f"Bearer {CFG.llm_api_key}"},
+        )
+        choices = data.get("choices", [])
+        return (choices[0].get("message", {}).get("content") or "").strip() or None if choices else None
+    except Exception as exc:
+        print(f"[vision] fallback ({type(exc).__name__}: {exc})")
+        return None
+
+
+def extract_profile_signals(image_b64: str) -> dict[str, Any]:
+    """
+    Lê um PRINT de perfil de Instagram e devolve sinais textuais (valor do LLM;
+    a confiança é INFERÊNCIA, calculada pelo scorer). Retorna {} em falha.
+    """
+    prompt = (
+        "Esta é uma captura de tela de um perfil de marca no Instagram. Leia o "
+        "texto visível (nome, bio, legendas, destaques) e responda APENAS um JSON: "
+        '{"positioning":"<bio/proposta de valor>","tone_of_voice":"<2-4 palavras>",'
+        '"vocabulary":["palavra","palavra"],"audience":"<público provável>"}. '
+        "Se algo não aparecer, use string vazia ou lista vazia."
+    )
+    raw = call_vision(image_b64, prompt)
+    if not raw:
+        return {}
+    try:
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    out: dict[str, Any] = {}
+    if isinstance(data.get("positioning"), str) and data["positioning"].strip():
+        out["positioning"] = data["positioning"].strip()
+    if isinstance(data.get("tone_of_voice"), str) and data["tone_of_voice"].strip():
+        out["tone_of_voice"] = data["tone_of_voice"].strip()
+    if isinstance(data.get("vocabulary"), list) and data["vocabulary"]:
+        out["vocabulary"] = [str(v).strip() for v in data["vocabulary"] if str(v).strip()][:6]
+    if isinstance(data.get("audience"), str) and data["audience"].strip():
+        out["audience"] = data["audience"].strip()
+    return out
+
+
 def llm_phrase_question(node: Node) -> str:
     """Frase humana da pergunta — via LLM se houver chave, senão heurística."""
     if not CFG.has_llm:
@@ -334,7 +398,9 @@ class Handler(BaseHTTPRequestHandler):
                 body.get("handle", ""), has_meta_creds=CFG.has_meta_creds,
                 lens_token=lens.get("access_token"), lens_ig_id=lens.get("ig_user_id"))
         elif source == "upload":
-            bundle = connectors.connect_upload(body.get("files", []))
+            bundle = connectors.connect_upload(
+                body.get("files", []),
+                vision_call=(extract_profile_signals if CFG.has_llm else None))
         else:
             return self._json({"error": "fonte_desconhecida", "source": source}, 400)
 

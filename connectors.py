@@ -499,21 +499,26 @@ def _top_words(captions: list[str], n: int = 5) -> list[str]:
     return [w for w, _ in freq.most_common(n)]
 
 
-def connect_upload(files: list[dict[str, Any]] | None = None) -> RawBundle:
+def connect_upload(files: list[dict[str, Any]] | None = None,
+                   vision_call=None) -> RawBundle:
     """
-    Upload (logo/doc): paleta EXATA por CV (Pillow) E parse de PDF/DOCX.
+    Upload (logo/doc/print): paleta EXATA por CV (Pillow), parse de PDF/DOCX, e
+    leitura de PRINTS de perfil por visão (vision_call).
     Cada item de `files` pode trazer:
-      - {"b64": "<base64>", "name": "logo.png"} -> imagem: extrai paleta real
+      - {"b64": "<base64>", "name": "logo.png"} -> imagem: extrai paleta (CV)
+      - {"b64": "<base64>", "name": "print.png", "vision": true} -> print de
+        perfil: paleta (CV) + texto lido por visão (bio/tom/vocabulário)
       - {"b64": "<base64>", "name": "brand.pdf"} -> documento: extrai copy
-      - {"path": "/caminho/arquivo", "name": ...} -> idem, lendo do disco
+      - {"path": "/caminho", "name": ...} -> idem, lendo do disco
       - {"palette": [[(rgb,peso),...]]} -> paleta já pronta (mock/teste)
-    Sem nenhum desses, devolve um mock coerente para o fluxo rodar.
     """
     files = files or []
     palettes: list[list[tuple[RGB, float]]] = []
     doc_signals: dict[str, Any] = {}
+    vision_signals: dict[str, Any] = {}
     real_imgs = 0
     real_docs = 0
+    real_shots = 0
     errors: list[str] = []
 
     for f in files:
@@ -537,8 +542,15 @@ def connect_upload(files: list[dict[str, Any]] | None = None) -> RawBundle:
                 doc_signals.update(_doc_signals(text))  # brand guide = DECLARADO
                 real_docs += 1
             else:
-                palettes.append(palette_from_image_bytes(data))
+                palettes.append(palette_from_image_bytes(data))  # cor sempre por CV
                 real_imgs += 1
+                # PRINT de perfil: lê bio/legendas por visão (texto que o CV não vê)
+                if vision_call is not None and f.get("vision"):
+                    b64 = f.get("b64") or base64.b64encode(data).decode()
+                    vis = vision_call(b64) or {}
+                    if vis:
+                        vision_signals.update(vis)
+                        real_shots += 1
         except Exception as exc:  # arquivo inválido / dependência ausente
             errors.append(f"{name or 'arquivo'}: {type(exc).__name__}: {exc}")
 
@@ -553,6 +565,10 @@ def connect_upload(files: list[dict[str, Any]] | None = None) -> RawBundle:
             logo_rgb = max(valid, key=lambda c: c[1])[0]
             raw["color_logo"] = {"value": tuple(logo_rgb), "scope": Scope.CV}
     raw.update(doc_signals)
+    # sinais lidos do print de perfil (texto via visão) = INFERÊNCIA
+    for k, v in vision_signals.items():
+        if v not in (None, "", []):
+            raw[k] = {"value": v, "scope": Scope.INFERENCIA}
 
     if not raw:
         # mock default: um logo institucional
@@ -563,6 +579,8 @@ def connect_upload(files: list[dict[str, Any]] | None = None) -> RawBundle:
         bits = []
         if real_imgs:
             bits.append(f"{real_imgs} imagem(ns) por CV")
+        if real_shots:
+            bits.append(f"{real_shots} print(s) lido(s) por visão")
         if real_docs:
             bits.append(f"{real_docs} documento(s) por parse")
         detail = "Upload real: " + (", ".join(bits) or "paleta fornecida") + "."
