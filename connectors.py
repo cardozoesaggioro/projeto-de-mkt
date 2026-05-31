@@ -197,22 +197,42 @@ def _site_real(url: str, sync_playwright) -> RawBundle:
 
         # --- CSS COMPUTADO (deterministico): cor de destaque + tipografia ---
         # cor: pega a cor computada de um CTA/botão proeminente; senão, do h1.
-        accent = page.evaluate(
+        # PRIMÁRIA = cor de SUPERFÍCIE dominante (maior área colorida no topo);
+        # ACENTO = cor do CTA/botão. Antes confundíamos os dois (pegava o CTA
+        # como primária). Agora separamos: primária -> color_css, acento -> color_accent.
+        colors = page.evaluate(
             """() => {
-                const el = document.querySelector('button, .btn, a.button, [class*=cta]')
-                          || document.querySelector('h1') || document.body;
-                const s = getComputedStyle(el);
-                // prioriza background com cor; senão a cor do texto
-                const bg = s.backgroundColor;
-                return (bg && bg !== 'rgba(0, 0, 0, 0)') ? bg : s.color;
+                const rgb = s => { const m=(s||'').match(/\\d+/g);
+                    return (m && m.length>=3) ? [ +m[0], +m[1], +m[2] ] : null; };
+                // "neutro" = branco/preto/cinza claro (fundo/texto), não conta como marca
+                const neutral = c => !c || Math.min(c[0],c[1],c[2])>238 ||
+                    Math.max(c[0],c[1],c[2])<18 ||
+                    (Math.max(...c)-Math.min(...c) < 14 && Math.min(...c) > 170);
+                // ACENTO: CTA/botão proeminente
+                const cta = document.querySelector(
+                    'button, .btn, a.button, [class*=cta], [class*=btn]');
+                let accent = cta ? rgb(getComputedStyle(cta).backgroundColor) : null;
+                if (neutral(accent)) accent = null;
+                // PRIMÁRIA: maior área de superfície COLORIDA acima da dobra
+                let best=null, bestArea=0;
+                for (const el of document.querySelectorAll('header, section, div, nav, main, footer')) {
+                    const r = el.getBoundingClientRect();
+                    if (r.top > 760 || r.width*r.height < 40000) continue;
+                    const bg = rgb(getComputedStyle(el).backgroundColor);
+                    if (neutral(bg)) continue;
+                    const area = r.width * Math.min(r.height, 800);
+                    if (area > bestArea) { bestArea = area; best = bg; }
+                }
+                return { primary: best, accent };
             }"""
         )
         font = page.evaluate(
             "() => getComputedStyle(document.querySelector('h1, h2') || document.body).fontFamily"
         )
-        rgb = _parse_rgb(accent)
-        if rgb:
-            raw["color_css"] = {"value": rgb, "scope": Scope.DETERMINISTICO}
+        if colors.get("primary"):
+            raw["color_css"] = {"value": tuple(colors["primary"]), "scope": Scope.DETERMINISTICO}
+        if colors.get("accent"):
+            raw["color_accent"] = {"value": tuple(colors["accent"]), "scope": Scope.DETERMINISTICO}
         if font:
             raw["typography"] = {"value": font.split(",")[0].strip(' "\''),
                                  "scope": Scope.DETERMINISTICO}
@@ -725,11 +745,16 @@ def build_nodes(bundles: list[RawBundle],
         if d.is_color and d.id == "primary_color":
             prov, cv = _color_provenance(usable)
         elif d.id == "secondary_color":
+            # secundária/acento = cor do CTA (determinística) + cor do logo (CV)
             prov = []
             for b in usable:
+                accent = b.raw.get("color_accent")
+                if accent:
+                    prov.append(Provenance(b.source, accent["scope"], _hex(tuple(accent["value"])),
+                                           b.access_status, b.detail))
                 logo = b.raw.get("color_logo")
                 if logo:
-                    prov.append(Provenance(b.source, logo["scope"], _hex(logo["value"]),
+                    prov.append(Provenance(b.source, logo["scope"], _hex(tuple(logo["value"])),
                                            b.access_status, b.detail))
         else:
             prov = _gather_provenance(d.id, usable)
