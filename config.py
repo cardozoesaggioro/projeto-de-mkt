@@ -22,7 +22,9 @@ def load_dotenv(path: str | os.PathLike | None = None) -> None:
     env_path = Path(path) if path else Path(__file__).with_name(".env")
     if not env_path.exists():
         return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
+    # utf-8-sig tolera o BOM que o PowerShell (Out-File/Set-Content -Encoding utf8)
+    # adiciona — sem isso, a 1ª chave viria como "﻿LLM_API_KEY" e não casaria.
+    for line in env_path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
