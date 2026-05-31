@@ -118,6 +118,12 @@ def connect_site(url: str) -> RawBundle:
 
     if not url:
         return _site_mock()
+    # hosts-placeholder do onboarding -> mock coerente (demo sem credencial)
+    host = urllib.parse.urlsplit(url).netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host in {"exemplo.com.br", "exemplo.com", "example.com", "example.org"}:
+        return _site_mock()
     if not _robots_allows(url):
         return RawBundle("site", "blocked",
                          detail=f"robots.txt não permite rastrear {url}.")
