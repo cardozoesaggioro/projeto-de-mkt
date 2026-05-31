@@ -1,0 +1,9 @@
+# Ponto Zero v1 roda em STDLIB pura (http.server, sqlite3, json) — sem deps.
+# Os itens abaixo entram quando ligarmos os conectores reais (ver TODO[REAL]):
+#
+# playwright>=1.49      # render headless do site -> CSS computado / copy / logo
+# anthropic>=0.40       # proxy LLM (tom, pilares, frase das perguntas, arquétipos)
+# pillow>=11.0          # extração de paleta exata de uploads (CV)
+# pypdf>=5.0            # parse de PDF nos uploads de brand guide
+#
+# Mantido vazio de propósito no v1 para o build ser instantâneo.

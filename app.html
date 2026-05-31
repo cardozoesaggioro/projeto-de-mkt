@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ponto Zero — brand book</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#2a313c; --ink:#e6edf3;
+    --mut:#8b949e; --acc:#3b82f6; --ok:#2ea043; --warn:#d29922; --err:#da3633;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--ink)}
+  header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;
+         align-items:baseline;gap:12px}
+  header h1{font-size:18px;margin:0}
+  header .sub{color:var(--mut);font-size:13px}
+  .wrap{display:grid;grid-template-columns:1fr 320px;gap:20px;padding:24px;
+        max-width:1180px;margin:0 auto;align-items:start}
+  @media(max-width:880px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        padding:18px;margin-bottom:16px}
+  h2{font-size:15px;margin:0 0 12px;letter-spacing:.02em}
+  .muted{color:var(--mut);font-size:13px}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);
+         background:#21262d;color:var(--ink);padding:9px 14px}
+  button:hover{border-color:var(--acc)}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+  button.opt{display:block;width:100%;text-align:left;margin:6px 0;padding:12px}
+  button.opt b{color:var(--ink)} button.opt .t{color:var(--mut);font-size:13px}
+  input,textarea{font:inherit;background:#0d1117;color:var(--ink);
+        border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%}
+  .row{display:flex;gap:8px;align-items:center;margin:8px 0}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;
+        border:1px solid var(--line);color:var(--mut)}
+  .pill.ok{color:var(--ok);border-color:var(--ok)}
+  .pill.warn{color:var(--warn);border-color:var(--warn)}
+  .pill.confirmado{color:var(--ok);border-color:var(--ok)}
+  .pill.palpite{color:var(--warn);border-color:var(--warn)}
+  .pill.ausente{color:var(--err);border-color:var(--err)}
+  .bar{height:6px;background:#0d1117;border-radius:99px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--acc)}
+  .swatch{display:inline-block;width:14px;height:14px;border-radius:3px;
+          vertical-align:middle;border:1px solid #0006;margin-right:6px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td,th{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;
+        vertical-align:top}
+  .right{text-align:right}
+  .hide{display:none}
+  .slidebox{width:340px;height:340px;border-radius:14px;overflow:hidden;
+            box-shadow:0 8px 30px #0008;margin:auto}
+  .panel-metric{display:flex;justify-content:space-between;margin:6px 0;font-size:13px}
+  .q-meta{display:flex;gap:14px;font-size:12px;color:var(--mut);margin:6px 0 14px}
+  .step{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}
+  .step span{font-size:12px;color:var(--mut);padding:3px 10px;border-radius:99px;
+             border:1px solid var(--line)}
+  .step span.on{color:#fff;background:var(--acc);border-color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Ponto Zero</h1>
+  <span class="sub">brand book a partir das fontes da empresa — o mínimo de perguntas</span>
+</header>
+
+<div class="wrap">
+  <!-- ============ COLUNA PRINCIPAL ============ -->
+  <main>
+    <div class="step">
+      <span id="s1" class="on">1 · Conectar</span>
+      <span id="s2">2 · Postura</span>
+      <span id="s3">3 · Entrevista</span>
+      <span id="s4">4 · Recap</span>
+      <span id="s5">5 · Amostra</span>
+    </div>
+
+    <!-- 1 · ONBOARDING -->
+    <section id="onboard" class="card">
+      <h2>Conecte as fontes da marca</h2>
+      <p class="muted">Nada de senha — só URL pública, OAuth e uploads. Os segredos
+        ficam no servidor. Você pode rodar tudo com dados de exemplo (mock).</p>
+      <div class="row"><input id="siteUrl" placeholder="https://site-da-empresa.com.br"
+           value="https://exemplo.com.br"><button onclick="extract('site')">Conectar site</button></div>
+      <div class="row"><input id="igHandle" placeholder="@perfil_business"
+           value="@exemplo"><button onclick="connectIG()">Conectar Instagram</button></div>
+      <div class="row"><input id="uploadName" placeholder="logo.png / brand.pdf (mock)">
+           <button onclick="extract('upload')">Enviar upload</button></div>
+      <div class="row" style="margin-top:14px">
+        <button class="primary" onclick="seedAndGo()">Usar exemplos e começar ▶</button>
+        <span class="muted" id="connStatus"></span>
+      </div>
+      <div id="bundles" class="muted" style="margin-top:10px"></div>
+    </section>
+
+    <!-- 2 · POSTURA -->
+    <section id="posture" class="card hide">
+      <h2>Antes de tudo: como é a marca hoje?</h2>
+      <p class="muted">Essa resposta repondera tudo — define quanto confiar nos sinais.</p>
+      <button class="opt" onclick="setPosture('consistente')"><b>Consistente</b>
+        <div class="t">Usa sempre as mesmas cores, tom e símbolos.</div></button>
+      <button class="opt" onclick="setPosture('espalhada')"><b>Espalhada</b>
+        <div class="t">Varia muito entre canais e peças.</div></button>
+      <button class="opt" onclick="setPosture('mudando')"><b>Mudando</b>
+        <div class="t">Está em transição / rebranding.</div></button>
+    </section>
+
+    <!-- 3 · ENTREVISTA -->
+    <section id="interview" class="card hide">
+      <h2 id="qText">…</h2>
+      <div class="q-meta">
+        <span id="qGroup"></span><span id="qConf"></span><span id="qImpact"></span>
+      </div>
+      <div id="qOptions"></div>
+      <div class="row" style="margin-top:10px">
+        <input id="qOther" placeholder="outro valor (corrigir)…">
+        <button onclick="answerOther()">Corrigir</button>
+      </div>
+      <div id="qProv" class="muted" style="margin-top:10px"></div>
+    </section>
+
+    <!-- 4 · RECAP -->
+    <section id="recap" class="card hide">
+      <h2>Recap do brand book</h2>
+      <p class="muted">Proveniência, status e confiança — escaneável.</p>
+      <table id="recapTable"></table>
+      <div class="row" style="margin-top:14px">
+        <input id="brandId" placeholder="id da marca (ex.: cardozoesaggioro)" style="max-width:280px">
+        <button onclick="saveBook()">Salvar</button>
+        <button class="primary" onclick="showSample()">Ver slide de amostra ▶</button>
+        <span class="muted" id="saveStatus"></span>
+      </div>
+    </section>
+
+    <!-- 5 · AMOSTRA -->
+    <section id="sample" class="card hide">
+      <h2>Reaja a este slide</h2>
+      <p class="muted">A validação final é reagir a uma amostra gerada com seus
+        valores — não auditar uma lista.</p>
+      <div class="slidebox"><iframe id="slideFrame" style="border:0;width:100%;height:100%"></iframe></div>
+      <div class="row" style="justify-content:center;margin-top:16px">
+        <button class="primary" onclick="alert('Brand book aprovado ✔')">Está com a cara da marca ✔</button>
+        <button onclick="show('recap')">Ajustar algo</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ PAINEL DO MOTOR AO VIVO ============ -->
+  <aside>
+    <div class="card">
+      <h2>Motor ao vivo</h2>
+      <div class="panel-metric"><span>tau (limiar)</span><b id="mTau">—</b></div>
+      <div class="bar" style="margin-bottom:10px"><i id="mTauBar" style="width:0"></i></div>
+      <div class="panel-metric"><span>postura</span><b id="mPosture">—</b></div>
+      <div class="panel-metric"><span>suficiência</span><b id="mSuf">—</b></div>
+      <div class="panel-metric"><span>distinção capturada</span><b id="mDist">—</b></div>
+      <div class="panel-metric"><span>perguntas</span><b id="mQ">0</b></div>
+      <div class="panel-metric"><span>hit rate</span><b id="mHit">—</b></div>
+      <div class="panel-metric"><span>falsa confiança</span><b id="mFalse">—</b></div>
+    </div>
+    <div class="card">
+      <h2>Fila por score</h2>
+      <div id="queue" class="muted">conecte uma fonte…</div>
+    </div>
+    <div class="card">
+      <h2>Saúde</h2>
+      <div id="health" class="muted">…</div>
+    </div>
+  </aside>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let SID = null;            // id da sessão
+let LAST = null;           // último snapshot
+let HEALTH = null;         // /api/health (saber se IG/LLM estão prontos)
+
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  return r.json();
+}
+function show(id){
+  ['onboard','posture','interview','recap','sample'].forEach(s=>$('#'+s).classList.add('hide'));
+  $('#'+id).classList.remove('hide');
+  const map={onboard:'s1',posture:'s2',interview:'s3',recap:'s4',sample:'s5'};
+  ['s1','s2','s3','s4','s5'].forEach(s=>$('#'+s).classList.remove('on'));
+  $('#'+map[id]).classList.add('on');
+}
+
+// ---- 1 · extração / onboarding ----
+async function extract(source, payload){
+  const body = Object.assign({session:SID}, payload||{});
+  if(source==='site') body.url = $('#siteUrl').value;
+  if(source==='upload') body.files = [];   // mock: paleta de exemplo no servidor
+  const res = await api('/api/extract/'+source, {method:'POST',
+              headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  SID = res.session;
+  $('#connStatus').textContent = `${source} ✔ (${res.bundle.access_status}) · ${res.n_nodes} nós`;
+  const div=$('#bundles');
+  div.innerHTML += `<div>• <b>${res.bundle.source}</b> <span class="pill ${res.bundle.access_status==='ok'?'ok':'warn'}">${res.bundle.access_status}</span> ${res.bundle.detail}</div>`;
+  refreshPanel();
+  return SID;
+}
+async function connectIG(){
+  // Com credenciais Meta: abre o OAuth real (Graph API). Sem elas: mock direto.
+  const igReady = HEALTH && /^pronto/.test(HEALTH.integrations.instagram);
+  if(igReady){
+    if(!SID){ SID = (await extract('site')) ? SID : SID; }  // garante sessão
+    window.open('/auth/instagram/start?session='+(SID||''), '_blank');
+    $('#connStatus').textContent = 'OAuth do Instagram aberto em nova aba — autorize e volte.';
+    return;
+  }
+  extract('instagram', {handle: $('#igHandle').value});
+}
+async function seedAndGo(){
+  await extract('site'); await connectIG(); await extract('upload');
+  show('posture');
+}
+
+// ---- 2 · postura ----
+async function setPosture(p){
+  const res = await api('/api/motor/posture', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({session:SID, posture:p})});
+  LAST = res.snapshot; renderPanel(res.snapshot);
+  renderQuestion(res.next);
+}
+
+// ---- 3 · entrevista ----
+function renderQuestion(q){
+  if(!q){ buildRecap(); return; }   // suficiência -> recap
+  show('interview');
+  $('#qText').textContent = q.pergunta;
+  $('#qGroup').textContent = '◆ '+q.group;
+  $('#qConf').textContent = 'confiança '+(q.confidence*100|0)+'%';
+  $('#qImpact').textContent = 'impacto '+q.impact;
+  const opts = $('#qOptions'); opts.innerHTML='';
+  // palpite do sistema (se houver) vira a 1a opção clicável
+  if(q.palpite !== null && q.palpite !== undefined){
+    opts.appendChild(optBtn(fmt(q.palpite), 'palpite do sistema', ()=>answer(q.node_id,'confirm',null)));
+  }
+  // alternativas (reconhecimento, não evocação)
+  (q.alternativas||[]).forEach(a=>{
+    opts.appendChild(optBtn(fmt(a), 'alternativa', ()=>answer(q.node_id,'correct',a)));
+  });
+  $('#qOther').value='';
+  $('#qOther').dataset.node = q.node_id;
+  // proveniência honesta
+  $('#qProv').innerHTML = '<b>proveniência:</b> ' + (q.provenance||[]).map(p=>
+     `${p.source}(${p.scope}/${p.access_status})`).join(' · ') || '—';
+}
+function optBtn(title, tag, fn){
+  const b=document.createElement('button'); b.className='opt';
+  const sw = /^#([0-9A-F]{6})$/i.test(title) ? `<span class="swatch" style="background:${title}"></span>`:'';
+  b.innerHTML = `<b>${sw}${title}</b><div class="t">${tag}</div>`;
+  b.onclick=fn; return b;
+}
+async function answer(node_id, action, value){
+  const res = await api('/api/motor/answer', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({session:SID, node_id, action, value})});
+  LAST=res.snapshot; renderPanel(res.snapshot);
+  renderQuestion(res.next);
+}
+function answerOther(){
+  const v=$('#qOther').value.trim(); if(!v) return;
+  answer($('#qOther').dataset.node, 'correct', v);
+}
+
+// ---- 4 · recap ----
+async function buildRecap(){
+  const bb = await api('/api/brandbook?session='+SID);
+  const rows = bb.nodes.map(n=>{
+    const sw = /^#([0-9A-F]{6})$/i.test(''+n.value)?`<span class="swatch" style="background:${n.value}"></span>`:'';
+    const prov = n.provenance.map(p=>p.source).join(', ')||'—';
+    return `<tr><td>${n.label}</td><td>${sw}${fmt(n.value)}</td>
+      <td><span class="pill ${n.status}">${n.status}</span></td>
+      <td>${(n.confidence*100|0)}%</td><td class="muted">${prov}</td></tr>`;
+  }).join('');
+  $('#recapTable').innerHTML =
+    `<tr><th>atributo</th><th>valor</th><th>status</th><th>conf.</th><th>fontes</th></tr>`+rows;
+  show('recap');
+}
+async function saveBook(){
+  const id=$('#brandId').value.trim(); if(!id){$('#saveStatus').textContent='informe um id';return;}
+  const res=await api('/api/brandbook',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({session:SID, brand_id:id})});
+  $('#saveStatus').textContent = res.ok ? 'salvo ✔' : 'erro';
+}
+
+// ---- 5 · amostra ----
+async function showSample(){
+  const res = await api('/api/sample?session='+SID);
+  const html = res.sample_slide.html;
+  const f=$('#slideFrame'); f.srcdoc=`<body style="margin:0">${html}</body>`;
+  show('sample');
+}
+
+// ---- painel ----
+function fmt(v){ if(Array.isArray(v)) return v.join(' · '); return v===null||v===undefined?'—':(''+v); }
+async function refreshPanel(){
+  if(!SID) return;
+  const res = await api('/api/motor/next?session='+SID);
+  if(res.snapshot){ LAST=res.snapshot; renderPanel(res.snapshot); }
+}
+function renderPanel(s){
+  if(!s) return;
+  $('#mTau').textContent=s.tau;
+  $('#mTauBar').style.width=Math.min(100,(s.tau/0.6*100))+'%';
+  $('#mPosture').textContent=s.postura||'—';
+  $('#mSuf').textContent=s.suficiente?'atingida':'não';
+  $('#mDist').textContent=s.distincao_capturada;
+  $('#mQ').textContent=s.metrics.perguntas_ate_suficiencia;
+  $('#mHit').textContent=(s.metrics.hit_rate*100|0)+'%';
+  $('#mFalse').textContent=(s.metrics.taxa_falsa_confianca*100|0)+'%';
+  $('#queue').innerHTML = s.fila.slice(0,8).map(n=>{
+    const w=(n.score/0.7*100)|0;
+    return `<div style="margin:6px 0"><div style="display:flex;justify-content:space-between">
+      <span>${n.label}</span><span class="muted">${n.score}</span></div>
+      <div class="bar"><i style="width:${Math.min(100,w)}%"></i></div></div>`;
+  }).join('');
+}
+async function loadHealth(){
+  const h=await api('/api/health'); HEALTH=h;
+  $('#health').innerHTML = Object.entries(h.integrations).map(([k,v])=>
+     `<div>• <b>${k}</b>: ${v}</div>`).join('') +
+     (h.missing_credentials.length?`<div style="margin-top:8px" class="pill warn">faltam ${h.missing_credentials.length} credenciais</div>`:'');
+}
+loadHealth();
+</script>
+</body>
+</html>

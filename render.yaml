@@ -1,0 +1,29 @@
+# Blueprint do Render (Infrastructure as Code). Deploy via Git.
+# Segredos NÃO ficam aqui: as chaves marcadas `sync: false` você preenche no
+# painel (Environment). O Render injeta PORT automaticamente.
+services:
+  - type: web
+    name: ponto-zero
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # --- Meta / Instagram (preencher no painel) ---
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_REDIRECT_URI
+        sync: false        # ex.: https://app.mkt.cardozoesaggioro.com.br/auth/instagram/callback
+      - key: IG_SCOPES
+        value: instagram_basic,pages_show_list,business_management
+      # --- LLM (preencher no painel) ---
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: claude-sonnet-4-5
+      - key: LLM_PROVIDER
+        sync: false        # opcional: "anthropic" | "openai" (senão inferido do modelo)
+    # PORT é injetado pelo Render — NÃO definir aqui.

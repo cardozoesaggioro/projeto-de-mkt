@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Ponto Zero backend",
+      "runtimeExecutable": "C:\\Users\\rodri\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+      "runtimeArgs": ["C:\\Users\\rodri\\ponto_zero\\server.py"],
+      "port": 8000
+    }
+  ]
+}

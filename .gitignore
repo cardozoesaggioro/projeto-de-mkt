@@ -1,0 +1,10 @@
+# Segredos e dados locais — NUNCA comitar
+.env
+*.db
+ponto_zero.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
