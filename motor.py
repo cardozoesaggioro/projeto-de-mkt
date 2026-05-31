@@ -42,8 +42,14 @@ CONSUMPTION_MAP: dict[str, float] = {
     "audience": 0.60,
     "tagline": 0.60,
     "secondary_color": 0.55,
+    "cta_padrao": 0.55,
     "vocabulary": 0.50,
     "logo": 0.50,
+    "hashtags": 0.45,
+    "color_palette": 0.45,
+    "price_tier": 0.45,
+    "body_font": 0.35,
+    "competitors": 0.35,
 }
 
 TAU_START = 0.25

@@ -229,19 +229,30 @@ def _site_real(url: str, sync_playwright) -> RawBundle:
                     const area = r.width * Math.min(r.height, 800);
                     if (area > bestArea) { bestArea = area; best = bg; }
                 }
-                return { primary: best, accent };
+                const ctaText = cta ? (cta.innerText||'').trim().replace(/\\s+/g,' ') : '';
+                return { primary: best, accent, cta: ctaText };
             }"""
         )
-        font = page.evaluate(
-            "() => getComputedStyle(document.querySelector('h1, h2') || document.body).fontFamily"
+        fonts = page.evaluate(
+            """() => {
+                const f = el => el ? getComputedStyle(el).fontFamily : '';
+                return { heading: f(document.querySelector('h1, h2')),
+                         body: f(document.querySelector('p, li, article') || document.body) };
+            }"""
         )
+        def font1(ff):  # 1ª fonte da pilha, limpa
+            return (ff or "").split(",")[0].strip(' "\'') if ff else ""
+
         if colors.get("primary"):
             raw["color_css"] = {"value": tuple(colors["primary"]), "scope": Scope.DETERMINISTICO}
         if colors.get("accent"):
             raw["color_accent"] = {"value": tuple(colors["accent"]), "scope": Scope.DETERMINISTICO}
-        if font:
-            raw["typography"] = {"value": font.split(",")[0].strip(' "\''),
-                                 "scope": Scope.DETERMINISTICO}
+        if colors.get("cta") and 2 <= len(colors["cta"]) <= 40:
+            raw["cta_padrao"] = {"value": colors["cta"], "scope": Scope.DETERMINISTICO}
+        if font1(fonts.get("heading")):
+            raw["typography"] = {"value": font1(fonts["heading"]), "scope": Scope.DETERMINISTICO}
+        if font1(fonts.get("body")):
+            raw["body_font"] = {"value": font1(fonts["body"]), "scope": Scope.DETERMINISTICO}
 
         # --- COPY do DOM (robusta) ---
         # Colhe vários candidatos de uma vez; a escolha/limpeza é feita em Python.
@@ -430,6 +441,10 @@ def _instagram_discovery(lens_token: str, lens_ig_id: str, handle: str) -> RawBu
         raw["tone_of_voice"] = {"value": _tone_from_captions(captions),
                                 "scope": Scope.INFERENCIA}
         raw["vocabulary"] = {"value": _top_words(captions), "scope": Scope.INFERENCIA}
+        tags = _hashtags_from_captions(captions)
+        if tags:
+            # hashtags são declaradas pelo próprio perfil
+            raw["hashtags"] = {"value": tags, "scope": Scope.DECLARADO}
     palettes = _palettes_from_urls(media_urls[:8])
     if palettes:
         raw["image_palettes"] = palettes
@@ -452,6 +467,15 @@ def _palettes_from_urls(urls: list[str], timeout: int = 10) -> list[list[tuple[R
         except Exception:
             continue  # imagem indisponível / formato não suportado -> ignora
     return out
+
+
+def _hashtags_from_captions(captions: list[str], n: int = 8) -> list[str]:
+    """Coleta as hashtags mais recorrentes nas legendas."""
+    import re
+    from collections import Counter
+    tags = re.findall(r"#(\w+)", " ".join(captions))
+    freq = Counter("#" + t.lower() for t in tags)
+    return [t for t, _ in freq.most_common(n)]
 
 
 def _tone_from_captions(captions: list[str]) -> str:
@@ -659,16 +683,22 @@ ATTR_DEFS: list[AttrDef] = [
             propagates=["secondary_color", "typography", "logo"],
             expected_sources=3, is_color=True),
     AttrDef("secondary_color", "Cor secundária", Group.VISUAL, expected_sources=2, is_color=True),
-    AttrDef("typography", "Tipografia", Group.VISUAL, expected_sources=2),
+    AttrDef("color_palette", "Paleta completa", Group.VISUAL, expected_sources=1),
+    AttrDef("typography", "Tipografia (títulos)", Group.VISUAL, expected_sources=2),
+    AttrDef("body_font", "Fonte de corpo", Group.VISUAL, expected_sources=1),
     AttrDef("logo", "Logo", Group.VISUAL, expected_sources=2),
     AttrDef("tone_of_voice", "Tom de voz", Group.VERBAL, anchor=True,
-            propagates=["tagline", "vocabulary"], expected_sources=3),
+            propagates=["tagline", "vocabulary", "cta_padrao"], expected_sources=3),
     AttrDef("tagline", "Tagline", Group.VERBAL, expected_sources=2),
     AttrDef("vocabulary", "Vocabulário", Group.VERBAL, expected_sources=2),
+    AttrDef("cta_padrao", "CTA padrão", Group.VERBAL, expected_sources=1),
+    AttrDef("hashtags", "Hashtags", Group.VERBAL, expected_sources=1),
     AttrDef("pillars", "Pilares de conteúdo", Group.ESTRATEGIA, anchor=True,
             propagates=["positioning", "audience"], expected_sources=2),
     AttrDef("positioning", "Posicionamento", Group.ESTRATEGIA, expected_sources=2),
     AttrDef("audience", "Público-alvo", Group.ESTRATEGIA, expected_sources=2),
+    AttrDef("price_tier", "Faixa de preço", Group.ESTRATEGIA, expected_sources=1),
+    AttrDef("competitors", "Concorrentes", Group.ESTRATEGIA, expected_sources=1),
     AttrDef("archetype", "Arquétipo", Group.ESTRATEGIA, expected_sources=2),
 ]
 
@@ -770,7 +800,8 @@ def infer_strategic(corpus: str, llm_call) -> dict[str, Any]:
         f'Copy: """{corpus[:1500]}"""\n'
         f'Responda APENAS um JSON válido com as chaves: '
         f'{{"tone_of_voice": "<2-4 palavras>", "pillars": ["..","..",".."], '
-        f'"archetype": "<um id de: {ids}>", "audience": "<quem é o público>"}}.'
+        f'"archetype": "<um id de: {ids}>", "audience": "<quem é o público>", '
+        f'"price_tier": "<um de: Econômico|Acessível|Intermediário|Premium|Luxo>"}}.'
     )
     raw = llm_call(prompt, system="Responda só JSON válido, em pt-BR.", max_tokens=400)
     if not raw:
@@ -789,7 +820,32 @@ def infer_strategic(corpus: str, llm_call) -> dict[str, Any]:
         out["archetype"] = data["archetype"]
     if isinstance(data.get("audience"), str):
         out["audience"] = data["audience"].strip()
+    if data.get("price_tier") in ("Econômico", "Acessível", "Intermediário", "Premium", "Luxo"):
+        out["price_tier"] = data["price_tier"]
     return out
+
+
+def _build_palette_node(d: "AttrDef", usable: list[RawBundle],
+                        previous: dict[str, Node]) -> Node:
+    """Paleta completa = cor primária + alternativas do cluster CV."""
+    _, cvp = _color_provenance(usable)
+    if cvp:
+        palette = [cvp.hex] + list(cvp.alternatives)
+        node = Node(
+            id=d.id, label=d.label, group=d.group, scope=Scope.CV, value=palette,
+            status=Status.PALPITE,
+            signals=Signals(ceiling=SCOPE_CEILING[Scope.CV], dispersion=cvp.dispersion,
+                            agreement=0.9, coverage=cvp.coverage),
+            provenance=[Provenance("cv:cluster", Scope.CV, palette, "ok", "paleta do cluster")],
+        )
+    else:
+        node = Node(id=d.id, label=d.label, group=d.group, scope=Scope.INFERENCIA,
+                    value=None, status=Status.AUSENTE)
+    prev = previous.get(d.id)
+    if prev is not None and prev.is_sticky:
+        node.value, node.status, node.scope = prev.value, prev.status, prev.scope
+        node.signals = Signals(1.0, 0.0, 1.0, 1.0)
+    return node
 
 
 def build_nodes(bundles: list[RawBundle],
@@ -808,6 +864,10 @@ def build_nodes(bundles: list[RawBundle],
     nodes: dict[str, Node] = {}
 
     for d in ATTR_DEFS:
+        # caso especial: paleta completa = derivada do cluster CV (não via reconcile)
+        if d.id == "color_palette":
+            nodes[d.id] = _build_palette_node(d, usable, previous)
+            continue
         # 1) colher proveniência (cor tem caminho próprio via CV)
         cv = None
         if d.is_color and d.id == "primary_color":

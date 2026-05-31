@@ -27,14 +27,20 @@ import archetypes
 FIELD_TYPE: dict[str, str] = {
     "primary_color": "cor",
     "secondary_color": "cor",
-    "typography": "fonte",
+    "color_palette": "lista",     # paleta completa (várias cores)
+    "typography": "fonte",        # fonte de títulos/display
+    "body_font": "fonte",         # fonte de corpo/texto
     "logo": "aberto",
     "tone_of_voice": "categorico",
     "tagline": "aberto",
     "vocabulary": "lista",
+    "cta_padrao": "categorico",   # chamada para ação padrão
+    "hashtags": "lista",
     "pillars": "lista",
     "positioning": "aberto",
     "audience": "categorico",
+    "price_tier": "categorico",   # faixa de preço/posicionamento de valor
+    "competitors": "lista",
     "archetype": "categorico",
 }
 
@@ -81,12 +87,36 @@ FONT_SUGGESTIONS = [
     "Playfair Display", "Merriweather",
 ]
 
+# CTA padrão (chamada para ação).
+CTA_OPTIONS = [
+    _opt("Fale conosco", "Fale conosco", "contato/atendimento"),
+    _opt("Saiba mais", "Saiba mais", "conteúdo/educação"),
+    _opt("Solicite um orçamento", "Solicite um orçamento", "venda consultiva"),
+    _opt("Agende uma conversa", "Agende uma conversa", "reunião/consulta"),
+    _opt("Compre agora", "Compre agora", "e-commerce"),
+    _opt("Cadastre-se", "Cadastre-se", "lead/newsletter"),
+    _opt("Baixe o material", "Baixe o material", "isca digital"),
+    _opt("Assine agora", "Assine agora", "recorrência"),
+]
+
+# Faixa de preço / posicionamento de valor.
+PRICE_OPTIONS = [
+    _opt("Econômico", "Econômico", "menor preço"),
+    _opt("Acessível", "Acessível", "bom custo-benefício"),
+    _opt("Intermediário", "Intermediário", "valor médio de mercado"),
+    _opt("Premium", "Premium", "acima da média, diferenciado"),
+    _opt("Luxo", "Luxo", "alto padrão/exclusivo"),
+]
+
 CATALOG: dict[str, list[dict[str, str]]] = {
     "tone_of_voice": TONE_OPTIONS,
     "audience": AUDIENCE_OPTIONS,
     "archetype": archetypes.as_options_norm() if hasattr(archetypes, "as_options_norm") else [],
     "pillars": [_opt(p, p, "pilar sugerido") for p in PILLAR_SUGGESTIONS],
     "typography": [_opt(f, f, "fonte comum") for f in FONT_SUGGESTIONS],
+    "body_font": [_opt(f, f, "fonte comum") for f in FONT_SUGGESTIONS],
+    "cta_padrao": CTA_OPTIONS,
+    "price_tier": PRICE_OPTIONS,
 }
 
 
